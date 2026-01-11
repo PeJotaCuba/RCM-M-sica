@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Track, ViewState, CreditInfo, AuthMode } from './types';
 import { INITIAL_DB_CONTENT, parseTxtDatabase } from './constants';
@@ -23,8 +24,24 @@ const App: React.FC = () => {
 
   // Initialize DB
   useEffect(() => {
-    const parsed = parseTxtDatabase(INITIAL_DB_CONTENT);
-    setTracks(parsed);
+    // Try to load from musica.json first
+    fetch('./musica.json')
+      .then(response => {
+        if (!response.ok) {
+          throw new Error('Network response was not ok');
+        }
+        return response.json();
+      })
+      .then((data: Track[]) => {
+        console.log("Database loaded from musica.json");
+        setTracks(data);
+      })
+      .catch(error => {
+        console.warn("Could not load musica.json, falling back to static data.", error);
+        // Fallback to constants if file doesn't exist or fails
+        const parsed = parseTxtDatabase(INITIAL_DB_CONTENT);
+        setTracks(parsed);
+      });
   }, []);
 
   const handleLogin = (mode: 'guest' | 'admin') => {
