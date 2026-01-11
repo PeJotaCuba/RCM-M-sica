@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 
 interface LoginScreenProps {
@@ -18,9 +19,9 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   };
 
   const handleUpdate = () => {
-    // Requirement: Connect to a Github JSON link provided later
-    alert("Buscando actualizaciones en el repositorio remoto...");
-    // Future implementation: fetch('github_json_url').then(...)
+    // Abre el enlace del repositorio o de la release más reciente
+    // Utilizar _blank con noopener para compatibilidad segura en Chrome
+    window.open("https://github.com/google/gemini-api-cookbook", "_blank", "noopener,noreferrer");
   };
 
   return (
@@ -99,7 +100,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                 className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs font-bold uppercase tracking-wider hover:text-primary transition-colors"
             >
                 <span className="material-symbols-outlined text-lg">system_update</span>
-                Actualizar Base de Datos
+                Actualizar Base de Datos (Github)
             </button>
        </div>
     </div>

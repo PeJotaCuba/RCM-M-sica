@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo } from 'react';
 import { Track, FilterType } from '../types';
 
@@ -14,9 +15,10 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
   const listItems = useMemo(() => {
     const query = searchQuery.toLowerCase();
     
-    // Filter source first by query (loose search across fields to be helpful)
+    // Filter source first by query (loose search across fields including PATH)
     const matches = tracks.filter(t => 
        t.filename.toLowerCase().includes(query) ||
+       t.path.toLowerCase().includes(query) ||
        t.metadata.title.toLowerCase().includes(query) ||
        t.metadata.author.toLowerCase().includes(query) ||
        t.metadata.performer.toLowerCase().includes(query)
@@ -40,7 +42,7 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
             type: 'author',
             payload: matches.find(t => t.metadata.author === author)! // Associate with first found track for context
         }));
-    } else {
+    } else if (activeFilter === 'performer') {
         // Group by Performer
         const performers = Array.from(new Set(matches.map(t => t.metadata.performer).filter(Boolean)));
         return performers.sort().map(perf => ({
@@ -50,31 +52,54 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
             type: 'performer',
             payload: matches.find(t => t.metadata.performer === perf)!
         }));
+    } else {
+        // Folder View - Show Filename and Path
+        return matches.map(t => ({
+            id: t.id,
+            mainText: t.filename,
+            subText: t.path, // Display path clearly
+            type: 'folder',
+            payload: t
+        }));
     }
   }, [tracks, searchQuery, activeFilter]);
+
+  const copyToClipboard = (text: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(text).then(() => {
+        // Could add toast here, but for now we rely on user action
+        console.log("Ruta copiada:", text);
+    });
+  };
 
   return (
     <div className="flex flex-col h-full bg-background-light dark:bg-background-dark">
       {/* Search Header */}
       <div className="px-4 py-4 bg-white dark:bg-background-dark shadow-sm border-b border-gray-200 dark:border-gray-800 sticky top-0 z-10">
         <div className="flex flex-col gap-3">
-          {/* Top Options Bar (Requirement 1) */}
-          <div className="flex w-full bg-gray-100 dark:bg-gray-800 p-1 rounded-xl">
+          {/* Top Options Bar */}
+          <div className="flex w-full bg-gray-100 dark:bg-gray-800 p-1 rounded-xl overflow-x-auto no-scrollbar">
              <button 
                 onClick={() => setActiveFilter('title')}
-                className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${activeFilter === 'title' ? 'bg-white dark:bg-gray-700 text-primary shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}
+                className={`flex-1 min-w-[70px] py-1.5 text-[10px] sm:text-xs font-bold rounded-lg transition-all ${activeFilter === 'title' ? 'bg-white dark:bg-gray-700 text-primary shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}
              >
                 Títulos
              </button>
              <button 
+                onClick={() => setActiveFilter('folder')}
+                className={`flex-1 min-w-[70px] py-1.5 text-[10px] sm:text-xs font-bold rounded-lg transition-all ${activeFilter === 'folder' ? 'bg-white dark:bg-gray-700 text-primary shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}
+             >
+                Carpetas
+             </button>
+             <button 
                 onClick={() => setActiveFilter('author')}
-                className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${activeFilter === 'author' ? 'bg-white dark:bg-gray-700 text-primary shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}
+                className={`flex-1 min-w-[70px] py-1.5 text-[10px] sm:text-xs font-bold rounded-lg transition-all ${activeFilter === 'author' ? 'bg-white dark:bg-gray-700 text-primary shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}
              >
                 Autores
              </button>
              <button 
                 onClick={() => setActiveFilter('performer')}
-                className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${activeFilter === 'performer' ? 'bg-white dark:bg-gray-700 text-primary shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}
+                className={`flex-1 min-w-[70px] py-1.5 text-[10px] sm:text-xs font-bold rounded-lg transition-all ${activeFilter === 'performer' ? 'bg-white dark:bg-gray-700 text-primary shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}
              >
                 Intérpretes
              </button>
@@ -87,7 +112,7 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
               </div>
               <input 
                 className="flex w-full border-none bg-transparent text-gray-900 dark:text-white focus:ring-0 placeholder:text-gray-400 px-3 text-base font-normal leading-normal" 
-                placeholder="Buscar..." 
+                placeholder="Buscar por título, ruta..." 
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
@@ -108,22 +133,34 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
             <div 
               key={item.id} 
               onClick={() => onSelectTrack(item.payload)}
-              className="flex items-center gap-4 bg-white dark:bg-background-dark px-4 py-4 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer active:scale-[0.99]"
+              className="group flex items-center gap-4 bg-white dark:bg-background-dark px-4 py-4 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer active:scale-[0.99]"
             >
-              <div className={`flex items-center justify-center rounded-xl shrink-0 size-12 border ${activeFilter === 'title' ? 'bg-primary/10 border-primary/20 text-primary' : 'bg-miel/10 border-miel/20 text-miel'}`}>
+              <div className={`flex items-center justify-center rounded-xl shrink-0 size-12 border ${activeFilter === 'title' ? 'bg-primary/10 border-primary/20 text-primary' : (activeFilter === 'folder' ? 'bg-gray-100 border-gray-200 text-gray-600 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-400' : 'bg-miel/10 border-miel/20 text-miel')}`}>
                 <span className="material-symbols-outlined">
-                    {activeFilter === 'title' ? 'music_note' : (activeFilter === 'author' ? 'person_edit' : 'mic_external_on')}
+                    {activeFilter === 'title' ? 'music_note' : (activeFilter === 'folder' ? 'folder' : (activeFilter === 'author' ? 'person_edit' : 'mic_external_on'))}
                 </span>
               </div>
               <div className="flex flex-col flex-1 min-w-0">
                 <p className="text-gray-900 dark:text-gray-100 text-base font-bold leading-tight truncate">
                   {item.mainText}
                 </p>
-                <p className="text-gray-500 dark:text-gray-400 text-xs mt-1 truncate">
+                <p className="text-gray-500 dark:text-gray-400 text-xs mt-1 truncate" title={item.subText}>
                     {item.subText}
                 </p>
               </div>
+              
               <div className="shrink-0 flex items-center gap-2">
+                {/* Copy Path Button (Visible on hover or always in Folder view) */}
+                {(activeFilter === 'folder' || activeFilter === 'title') && (
+                    <button 
+                        onClick={(e) => copyToClipboard(item.payload.path, e)}
+                        className="p-2 rounded-full text-gray-300 hover:text-primary hover:bg-gray-100 dark:hover:bg-gray-700 transition-all"
+                        title="Copiar ruta"
+                    >
+                        <span className="material-symbols-outlined text-lg">content_copy</span>
+                    </button>
+                )}
+                
                 <span className="material-symbols-outlined text-gray-300 dark:text-gray-600">visibility</span>
               </div>
             </div>

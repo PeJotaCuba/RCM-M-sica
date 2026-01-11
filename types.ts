@@ -1,3 +1,4 @@
+
 export interface Track {
   id: string;
   filename: string;
@@ -23,7 +24,7 @@ export enum ViewState {
   RECENT = 'RECENT'
 }
 
-export type FilterType = 'title' | 'author' | 'performer';
+export type FilterType = 'title' | 'author' | 'performer' | 'folder';
 
 export interface SearchFilters {
   query: string;
