@@ -11,9 +11,12 @@ export interface Track {
 export interface CreditInfo {
   title: string;
   author: string; // Composer/Writer
+  authorCountry?: string;
   performer: string; // Artist/Band
-  album: string;
+  performerCountry?: string;
+  album: string; // Used as "Folder Name" in some contexts
   year: string;
+  genre?: string;
 }
 
 export enum ViewState {
@@ -21,7 +24,8 @@ export enum ViewState {
   LIST = 'LIST',
   SETTINGS = 'SETTINGS',
   RESULTS = 'RESULTS',
-  RECENT = 'RECENT'
+  RECENT = 'RECENT',
+  PRODUCTIONS = 'PRODUCTIONS'
 }
 
 export type FilterType = 'title' | 'author' | 'performer' | 'folder';
@@ -32,3 +36,18 @@ export interface SearchFilters {
 }
 
 export type AuthMode = 'guest' | 'admin' | null;
+
+export const PROGRAMS_LIST = [
+  "Buenos Días, Bayamo",
+  "Todos en Casa",
+  "Arte Bayamo",
+  "Parada Joven",
+  "Hablando con Juana",
+  "Sigue a tu ritmo",
+  "Al son de la radio",
+  "Cómplices",
+  "Coloreando Melodías",
+  "Alba y crisol",
+  "Estación 95.3",
+  "Palco de Domingo"
+];

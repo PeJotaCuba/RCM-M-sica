@@ -1,7 +1,6 @@
 
 import React, { useState } from 'react';
 import { Track } from '../types';
-import * as XLSX from 'xlsx';
 
 interface SettingsProps {
   tracks: Track[];
@@ -25,7 +24,6 @@ const Settings: React.FC<SettingsProps> = ({ tracks, onImportFolders, onImportCr
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, type: 'folders' | 'credits') => {
     if (e.target.files && e.target.files[0]) {
         setIsProcessing(true);
-        // Small timeout to allow UI to update loading state
         setTimeout(() => {
             if (type === 'folders') onImportFolders(e.target.files![0]);
             else onImportCredits(e.target.files![0]);
@@ -51,21 +49,21 @@ const Settings: React.FC<SettingsProps> = ({ tracks, onImportFolders, onImportCr
             <div className="bg-white dark:bg-white/5 p-6 rounded-xl border border-gray-200 dark:border-white/10 shadow-sm">
                 <div className="flex items-center gap-3 mb-4 text-azul-header dark:text-blue-400">
                     <span className="material-symbols-outlined">folder_managed</span>
-                    <h3 className="font-bold">Importar Carpetas (Excel)</h3>
+                    <h3 className="font-bold">Importar Base de Datos</h3>
                 </div>
                 <p className="text-sm text-gray-500 mb-4">
-                    Carga el archivo .xlsx con las columnas: <br/>
-                    <b>Nombre de Carpeta | Ruta de Carpeta | Título</b>
+                    Soporta Excel (.xlsx) y Texto (.txt) con los formatos:<br/>
+                    1. Tabla Excel (Nombre Carpeta | Ruta | Título)<br/>
+                    2. Bloques TXT (Título: X, Compositor: Y, Carpeta: Z...)
                 </p>
                 <label className="block w-full cursor-pointer group">
                     <div className="flex items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
                         <div className="flex flex-col items-center justify-center pt-5 pb-6">
                             <span className="material-symbols-outlined text-gray-400 text-3xl mb-2 group-hover:text-primary transition-colors">upload_file</span>
-                            <p className="mb-2 text-sm text-gray-500 dark:text-gray-400"><span className="font-semibold">Clic para subir Excel</span></p>
-                            <p className="text-xs text-gray-500 dark:text-gray-400">XLSX, XLS</p>
+                            <p className="mb-2 text-sm text-gray-500 dark:text-gray-400"><span className="font-semibold">Clic para subir Excel o TXT</span></p>
                         </div>
                     </div>
-                    <input type="file" accept=".xlsx, .xls" 
+                    <input type="file" accept=".xlsx, .xls, .txt" 
                         onChange={(e) => handleFileChange(e, 'folders')}
                         className="hidden"
                     />
@@ -73,32 +71,10 @@ const Settings: React.FC<SettingsProps> = ({ tracks, onImportFolders, onImportCr
             </div>
 
             <div className="bg-white dark:bg-white/5 p-6 rounded-xl border border-gray-200 dark:border-white/10 shadow-sm">
-                 <div className="flex items-center gap-3 mb-4 text-miel">
-                    <span className="material-symbols-outlined">library_music</span>
-                    <h3 className="font-bold">Actualizar Créditos</h3>
-                </div>
-                <p className="text-sm text-gray-500 mb-4">Importar metadatos adicionales (.xlsx) para archivos existentes.</p>
-                <label className="block w-full">
-                     <span className="sr-only">Elegir archivo</span>
-                    <input type="file" accept=".xlsx, .xls" 
-                        onChange={(e) => handleFileChange(e, 'credits')}
-                        className="block w-full text-sm text-gray-500
-                        file:mr-4 file:py-2 file:px-4
-                        file:rounded-full file:border-0
-                        file:text-xs file:font-semibold
-                        file:bg-miel file:text-white
-                        hover:file:bg-yellow-600
-                        cursor-pointer
-                    "/>
-                </label>
-            </div>
-
-            <div className="bg-white dark:bg-white/5 p-6 rounded-xl border border-gray-200 dark:border-white/10 shadow-sm">
                 <div className="flex items-center gap-3 mb-4 text-green-600">
                     <span className="material-symbols-outlined">data_object</span>
-                    <h3 className="font-bold">Exportar Base de Datos</h3>
+                    <h3 className="font-bold">Exportar JSON</h3>
                 </div>
-                <p className="text-sm text-gray-500 mb-4">Genera el archivo "musica.json" con el estado actual.</p>
                 <button 
                     onClick={handleDownloadJson}
                     className="w-full py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold shadow-md flex items-center justify-center gap-2"

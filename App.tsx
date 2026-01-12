@@ -7,6 +7,7 @@ import TrackDetail from './components/TrackDetail';
 import CreditResults from './components/CreditResults';
 import LoginScreen from './components/LoginScreen';
 import Settings from './components/Settings';
+import Productions from './components/Productions';
 import { fetchCreditsFromGemini } from './services/geminiService';
 import * as XLSX from 'xlsx';
 
@@ -25,26 +26,21 @@ const App: React.FC = () => {
 
   // Initialize DB
   useEffect(() => {
-    // Try to load from musica.json first with cache busting
     fetch(`./musica.json?v=${new Date().getTime()}`)
       .then(response => {
-        if (!response.ok) {
-           return []; // If 404 or empty, return empty array
-        }
+        if (!response.ok) return [];
         return response.json();
       })
       .then((data: Track[]) => {
         if (Array.isArray(data) && data.length > 0) {
-            console.log("Database loaded from musica.json");
             setTracks(data);
         } else {
-            console.log("Database empty or not found, starting clean.");
             setTracks([]); 
         }
       })
       .catch(error => {
         console.warn("Error loading musica.json", error);
-        setTracks([]); // Start empty on error
+        setTracks([]); 
       });
   }, []);
 
@@ -55,10 +51,9 @@ const App: React.FC = () => {
 
   const handleSelectTrack = (track: Track) => {
     setSelectedTrack(track);
-    // Add to recents (deduplicate)
     setRecentTracks(prev => {
         const filtered = prev.filter(t => t.id !== track.id);
-        return [track, ...filtered].slice(0, 10); // Keep last 10
+        return [track, ...filtered].slice(0, 10);
     });
   };
 
@@ -69,7 +64,7 @@ const App: React.FC = () => {
   const handleSearchCredits = async () => {
     if (!selectedTrack) return;
     setIsSearching(true);
-    setView(ViewState.RESULTS); // Full screen for results
+    setView(ViewState.RESULTS);
     
     const minDelay = new Promise(resolve => setTimeout(resolve, 1500));
     try {
@@ -87,12 +82,18 @@ const App: React.FC = () => {
 
   const handleApplyCredits = (newCredits: CreditInfo) => {
     if (!selectedTrack) return;
+    // Update main list
     setTracks(prev => prev.map(t => t.id === selectedTrack.id ? { ...t, isVerified: true, metadata: newCredits } : t));
+    // Update selected track locally to reflect changes immediately in Modal if it stays open (though we close it usually)
+    setSelectedTrack(prev => prev ? { ...prev, isVerified: true, metadata: newCredits } : null);
     
-    // Return to list (Modal closes)
     setView(ViewState.LIST);
-    setSelectedTrack(null);
     setFoundCredits(null);
+  };
+  
+  const handleManualEdit = (updatedTrack: Track) => {
+      setTracks(prev => prev.map(t => t.id === updatedTrack.id ? updatedTrack : t));
+      setSelectedTrack(updatedTrack);
   };
 
   const handleDiscardResults = () => {
@@ -100,19 +101,75 @@ const App: React.FC = () => {
       setFoundCredits(null);
   };
 
-  // --- Real File Import Logic (Excel) ---
+  // --- Merge Logic ---
+  const mergeTracks = (incomingTracks: Track[]) => {
+      setTracks(currentTracks => {
+          const merged = [...currentTracks];
+          let updatedCount = 0;
+          let addedCount = 0;
+
+          incomingTracks.forEach(incoming => {
+              // Match criteria: Title AND Folder (Album/Path) must match to overwrite.
+              // We normalize to lowercase for comparison.
+              const index = merged.findIndex(existing => {
+                  const titleMatch = existing.metadata.title.toLowerCase() === incoming.metadata.title.toLowerCase();
+                  // Check album (folder name) or path
+                  const folderMatch = existing.metadata.album.toLowerCase() === incoming.metadata.album.toLowerCase() ||
+                                      existing.path.toLowerCase() === incoming.path.toLowerCase();
+                  return titleMatch && folderMatch;
+              });
+
+              if (index >= 0) {
+                  // Overwrite existing
+                  merged[index] = {
+                      ...merged[index],
+                      // Merge metadata, preferring incoming
+                      metadata: { ...merged[index].metadata, ...incoming.metadata },
+                      // Keep ID of existing to not break references, update others
+                      isVerified: true
+                  };
+                  updatedCount++;
+              } else {
+                  // Add new
+                  merged.push(incoming);
+                  addedCount++;
+              }
+          });
+          
+          alert(`Importación completada.\nActualizados: ${updatedCount}\nAgregados: ${addedCount}`);
+          return merged;
+      });
+  };
+
+  // --- Import Handlers ---
 
   const handleImportFolders = async (file: File) => {
       if (!file) return;
       
+      const fileName = file.name.toLowerCase();
+      
+      // TXT Handler
+      if (fileName.endsWith('.txt')) {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+              const text = e.target?.result as string;
+              const newTracks = parseTxtDatabase(text);
+              if (newTracks.length > 0) {
+                  mergeTracks(newTracks);
+              } else {
+                  alert("No se pudieron leer pistas del archivo TXT.");
+              }
+          };
+          reader.readAsText(file);
+          return;
+      }
+
+      // XLSX Handler
       try {
           const data = await file.arrayBuffer();
           const workbook = XLSX.read(data);
           const firstSheetName = workbook.SheetNames[0];
           const worksheet = workbook.Sheets[firstSheetName];
-          
-          // Parse as array of arrays to handle columns by index
-          // Option '1' produces array of arrays (e.g., [["Name", "Path", "Title"], ["Val1", "Val2", "Val3"]])
           const rows: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
           if (rows.length < 2) {
@@ -120,15 +177,7 @@ const App: React.FC = () => {
               return;
           }
 
-          // Convert rows to Track objects
-          // Assumptions based on PDF:
-          // Col 0: "Nombre de Carpeta" (Folder Name / Group) -> Mapped to 'album' usually or just tag
-          // Col 1: "Ruta de Carpeta" (Full Path) -> Mapped to 'path'
-          // Col 2: "Título del Tema Musical" -> Mapped to 'title' and used for 'filename' if possible
-
           const newTracks: Track[] = [];
-
-          // Skip header row if it looks like a header
           let startIndex = 0;
           if (rows[0][0] && typeof rows[0][0] === 'string' && rows[0][0].toLowerCase().includes('nombre')) {
               startIndex = 1;
@@ -136,108 +185,59 @@ const App: React.FC = () => {
 
           for (let i = startIndex; i < rows.length; i++) {
               const row = rows[i];
-              // Ensure row has at least path
               if (!row[1]) continue;
 
-              const folderName = String(row[0] || "");
-              const fullPath = String(row[1] || "").trim(); // PDF Col 2: Ruta
-              const rawTitle = String(row[2] || "").trim(); // PDF Col 3: Título
+              const folderName = String(row[0] || "Desconocido");
+              const fullPath = String(row[1] || "").trim(); 
+              const rawTitle = String(row[2] || "").trim(); 
 
-              // Heuristic to get filename: last part of path, OR use title if it ends in extension
               let filename = rawTitle;
               if (!filename.match(/\.[0-9a-z]+$/i)) {
-                   // If title doesn't look like a file, check path
                    const pathParts = fullPath.split(/[\\/]/);
                    const lastPart = pathParts[pathParts.length - 1];
                    if (lastPart.match(/\.[0-9a-z]+$/i)) {
                        filename = lastPart;
                    } else {
-                       filename = rawTitle + ".mp3"; // Fallback assumption
+                       filename = rawTitle + ".mp3"; 
                    }
               }
-
-              // Clean Title (remove extension)
               const cleanTitle = rawTitle.replace(/\.[^/.]+$/, "") || filename.replace(/\.[^/.]+$/, "");
 
               newTracks.push({
                   id: `imp-${Date.now()}-${i}`,
                   filename: filename,
-                  path: fullPath, // Keep full path from Excel
+                  path: fullPath, 
                   size: '---',
-                  isVerified: false, // Imported from folder list is usually unverified until AI check
+                  isVerified: false, 
                   metadata: {
                       title: cleanTitle,
-                      author: '', // Not provided in this Excel format
-                      performer: '', // Not provided
-                      album: folderName, // Use "Nombre de Carpeta" as Album/Group context
+                      author: '', 
+                      performer: '', 
+                      album: folderName, // "Nombre de carpeta" acts as Album/Group
                       year: ''
                   }
               });
           }
 
           if (newTracks.length > 0) {
-              if (window.confirm(`Se encontraron ${newTracks.length} pistas. ¿Reemplazar base de datos?`)) {
-                  setTracks(newTracks);
-                  alert("Base de datos cargada exitosamente.");
-              }
+               mergeTracks(newTracks);
           } else {
               alert("No se pudieron interpretar las filas del Excel.");
           }
 
       } catch (error) {
           console.error("Error importando excel:", error);
-          alert("Error leyendo el archivo Excel. Asegúrese de que sea un .xlsx válido.");
+          alert("Error leyendo el archivo.");
       }
   };
 
   const handleImportCredits = async (file: File) => {
-      // For credits, we assume a similar logic or standard Excel parsing
-      if (!file) return;
+      // Logic reused: just merge whatever comes in
+      handleImportFolders(file);
+  };
 
-      try {
-          const data = await file.arrayBuffer();
-          const workbook = XLSX.read(data);
-          const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-          const json: any[] = XLSX.utils.sheet_to_json(worksheet); // Map by headers
-
-          if (json.length === 0) {
-               alert("No se encontraron datos.");
-               return;
-          }
-          
-          let updatedCount = 0;
-          const updatedTracks = tracks.map(t => {
-              // Try to find match by filename
-              const match = json.find((row: any) => {
-                  const rowFilename = row['filename'] || row['Archivo'] || row['Nombre'];
-                  return rowFilename && String(rowFilename).trim() === t.filename.trim();
-              });
-
-              if (match) {
-                  updatedCount++;
-                  return {
-                      ...t,
-                      isVerified: true,
-                      metadata: {
-                          ...t.metadata,
-                          title: match['Title'] || match['Título'] || t.metadata.title,
-                          author: match['Author'] || match['Autor'] || t.metadata.author,
-                          performer: match['Performer'] || match['Intérprete'] || t.metadata.performer,
-                          year: match['Year'] || match['Año'] || t.metadata.year,
-                          album: match['Album'] || match['Álbum'] || t.metadata.album
-                      }
-                  };
-              }
-              return t;
-          });
-
-          setTracks(updatedTracks);
-          alert(`Créditos actualizados en ${updatedCount} archivos.`);
-
-      } catch (error) {
-          console.error(error);
-          alert("Error importando créditos.");
-      }
+  const handleAddProductionTracks = (tracks: Track[]) => {
+      mergeTracks(tracks);
   };
 
   if (view === ViewState.LOGIN) {
@@ -253,7 +253,7 @@ const App: React.FC = () => {
                 <div className="flex items-center gap-3">
                     <span className="material-symbols-outlined cursor-pointer">radio</span>
                     <h1 className="text-lg font-bold tracking-tight">
-                        {view === ViewState.SETTINGS ? 'Ajustes' : (view === ViewState.RECENT ? 'Recientes' : 'RCM Música')}
+                        {view === ViewState.SETTINGS ? 'Ajustes' : (view === ViewState.RECENT ? 'Recientes' : (view === ViewState.PRODUCTIONS ? 'Producciones' : 'RCM Música'))}
                     </h1>
                 </div>
                 {authMode === 'admin' && (
@@ -288,6 +288,10 @@ const App: React.FC = () => {
                 />
             )}
 
+            {view === ViewState.PRODUCTIONS && (
+                <Productions onAddTracks={handleAddProductionTracks} />
+            )}
+
             {/* Results View (Full Screen) */}
             {view === ViewState.RESULTS && selectedTrack && (
                 <CreditResults 
@@ -306,35 +310,45 @@ const App: React.FC = () => {
                 track={selectedTrack} 
                 onClose={handleCloseDetail}
                 onSearchCredits={handleSearchCredits}
+                authMode={authMode}
+                onSaveEdit={handleManualEdit}
             />
         )}
         
         {/* Bottom Navigation */}
         {view !== ViewState.RESULTS && (
-            <nav className="bg-white dark:bg-background-dark border-t border-gray-200 dark:border-gray-800 h-20 px-6 flex items-center justify-between pb-2 z-20 shrink-0">
+            <nav className="bg-white dark:bg-background-dark border-t border-gray-200 dark:border-gray-800 h-20 px-2 flex items-center justify-between pb-2 z-20 shrink-0">
                 <button 
                     onClick={() => setView(ViewState.LIST)}
-                    className={`flex flex-col items-center gap-1 transition-colors ${view === ViewState.LIST ? 'text-primary' : 'text-gray-400 hover:text-azul-cauto'}`}
+                    className={`flex flex-col items-center gap-1 transition-colors px-2 ${view === ViewState.LIST ? 'text-primary' : 'text-gray-400 hover:text-azul-cauto'}`}
                 >
                     <span className={`material-symbols-outlined ${view === ViewState.LIST ? 'material-symbols-filled' : ''}`}>folder</span>
-                    <span className="text-[10px] font-bold">Explorador</span>
+                    <span className="text-[9px] sm:text-[10px] font-bold">Explorador</span>
                 </button>
                 
                 <button 
                     onClick={() => setView(ViewState.RECENT)}
-                    className={`flex flex-col items-center gap-1 transition-colors ${view === ViewState.RECENT ? 'text-primary' : 'text-gray-400 hover:text-azul-cauto'}`}
+                    className={`flex flex-col items-center gap-1 transition-colors px-2 ${view === ViewState.RECENT ? 'text-primary' : 'text-gray-400 hover:text-azul-cauto'}`}
                 >
                     <span className={`material-symbols-outlined ${view === ViewState.RECENT ? 'material-symbols-filled' : ''}`}>history</span>
-                    <span className="text-[10px] font-bold">Recientes</span>
+                    <span className="text-[9px] sm:text-[10px] font-bold">Recientes</span>
+                </button>
+
+                <button 
+                    onClick={() => setView(ViewState.PRODUCTIONS)}
+                    className={`flex flex-col items-center gap-1 transition-colors px-2 ${view === ViewState.PRODUCTIONS ? 'text-primary' : 'text-gray-400 hover:text-azul-cauto'}`}
+                >
+                    <span className={`material-symbols-outlined ${view === ViewState.PRODUCTIONS ? 'material-symbols-filled' : ''}`}>playlist_add</span>
+                    <span className="text-[9px] sm:text-[10px] font-bold">Producciones</span>
                 </button>
 
                 {authMode === 'admin' && (
                     <button 
                         onClick={() => setView(ViewState.SETTINGS)}
-                        className={`flex flex-col items-center gap-1 transition-colors ${view === ViewState.SETTINGS ? 'text-primary' : 'text-gray-400 hover:text-azul-cauto'}`}
+                        className={`flex flex-col items-center gap-1 transition-colors px-2 ${view === ViewState.SETTINGS ? 'text-primary' : 'text-gray-400 hover:text-azul-cauto'}`}
                     >
                         <span className={`material-symbols-outlined ${view === ViewState.SETTINGS ? 'material-symbols-filled' : ''}`}>settings</span>
-                        <span className="text-[10px] font-bold">Ajustes</span>
+                        <span className="text-[9px] sm:text-[10px] font-bold">Ajustes</span>
                     </button>
                 )}
             </nav>
