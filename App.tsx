@@ -57,9 +57,10 @@ const App: React.FC = () => {
             }
         }
 
-        // 2. Fallback to json file if no local data
+        // 2. Fallback to json file if no local data (Try GitHub as fallback if local is empty)
         try {
-            const response = await fetch(`./musica.json?v=${new Date().getTime()}`);
+            // Using GitHub raw link for initialization as well just in case
+            const response = await fetch(`https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/main/musica.json?v=${new Date().getTime()}`);
             if (response.ok) {
                 const data = await response.json();
                 if (Array.isArray(data) && data.length > 0) {
@@ -68,10 +69,10 @@ const App: React.FC = () => {
                     localStorage.setItem(DB_KEY, JSON.stringify(data));
                 }
             } else {
-                console.log("Iniciando con base de datos vacía.");
+                console.log("Iniciando con base de datos vacía o sin conexión.");
             }
         } catch (error) {
-            console.log("Base de datos local no disponible, iniciando limpio.");
+            console.log("Base de datos remota no disponible, iniciando limpio.");
         }
     };
     loadDB();
@@ -90,26 +91,33 @@ const App: React.FC = () => {
   };
 
   const handleUpdateDatabase = async () => {
-      const confirmUpdate = window.confirm("¿Desea buscar actualizaciones en el servidor? Esto descargará la última versión de la base de datos y la combinará con sus datos locales.");
+      const confirmUpdate = window.confirm("¿Buscar actualizaciones?\n\nEsto descargará la última base de datos desde GitHub y recargará la aplicación.");
       if (!confirmUpdate) return;
 
       try {
-          // Fetch with timestamp to bypass cache
-          const response = await fetch(`./musica.json?t=${Date.now()}`);
-          if (!response.ok) {
-              throw new Error("No se encontró el archivo de base de datos en el servidor.");
-          }
-          const remoteData = await response.json();
+          // Fetch from GitHub RAW url
+          const response = await fetch(`https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/main/musica.json?t=${Date.now()}`);
           
-          if (Array.isArray(remoteData) && remoteData.length > 0) {
-              mergeTracks(remoteData);
-              // Feedback handled inside mergeTracks via alert usually, or add explicit one here if mergeTracks is silent
+          if (response.status === 404) {
+              console.warn("Archivo musica.json no encontrado en GitHub.");
+              alert("No se encontró el archivo 'musica.json' en la ruta especificada de GitHub (404).\n\nVerifique que el archivo exista en el repositorio 'RCM-M-sica/main'.");
+          } else if (response.ok) {
+              const remoteData = await response.json();
+              if (Array.isArray(remoteData) && remoteData.length > 0) {
+                  // Merge logic saves to localStorage immediately
+                  mergeTracks(remoteData, true); 
+              } else {
+                  alert("La base de datos de GitHub está vacía.");
+              }
           } else {
-              alert("La base de datos del servidor está vacía.");
+              throw new Error(`Error del servidor: ${response.status}`);
           }
       } catch (error) {
           console.error("Update failed", error);
-          alert("Error al actualizar: Asegúrese de tener conexión a internet.");
+          alert("Aviso: No se pudo conectar con GitHub (puede ser un problema de red o CORS).\n\nSe recargará la aplicación para intentar actualizar el sistema.");
+      } finally {
+          // ALWAYS Reload to update App Version (Code)
+          window.location.reload();
       }
   };
 
@@ -164,7 +172,7 @@ const App: React.FC = () => {
   };
 
   // --- Merge Logic ---
-  const mergeTracks = (incomingTracks: Track[]) => {
+  const mergeTracks = (incomingTracks: Track[], silent = false) => {
       updateTracks(currentTracks => {
           const merged = [...currentTracks];
           let updatedCount = 0;
@@ -179,8 +187,6 @@ const App: React.FC = () => {
               });
 
               if (index >= 0) {
-                  // Optional: Check if incoming is "newer" or has more info. 
-                  // For now, assume incoming (server/import) overrides local if matches
                   merged[index] = {
                       ...merged[index],
                       metadata: { ...merged[index].metadata, ...incoming.metadata },
@@ -194,7 +200,9 @@ const App: React.FC = () => {
               }
           });
           
-          alert(`Base de datos sincronizada.\nActualizados: ${updatedCount}\nAgregados: ${addedCount}`);
+          if (!silent) {
+            alert(`Base de datos sincronizada.\nActualizados: ${updatedCount}\nAgregados: ${addedCount}`);
+          }
           return merged;
       });
   };
@@ -298,22 +306,24 @@ const App: React.FC = () => {
                     </h1>
                 </div>
                 {authMode === 'admin' && (
-                    <div className="flex items-center gap-2">
-                        <div className="bg-miel text-white text-[10px] font-bold px-2 py-0.5 rounded">ADMIN</div>
-                        <button 
-                            onClick={handleUpdateDatabase}
-                            className="text-white/80 hover:text-white transition-colors"
-                            title="Actualizar Base de Datos"
-                        >
-                            <span className="material-symbols-outlined text-lg">cloud_sync</span>
-                        </button>
-                        <button 
-                            onClick={handleLogout}
-                            className="text-white/80 hover:text-red-300 transition-colors"
-                            title="Cerrar Sesión"
-                        >
-                            <span className="material-symbols-outlined text-lg">logout</span>
-                        </button>
+                    <div className="flex items-center gap-4">
+                        <div className="bg-miel text-white text-[10px] font-bold px-2 py-0.5 rounded shadow-sm">ADMIN</div>
+                        <div className="flex items-center gap-3">
+                            <button 
+                                onClick={handleUpdateDatabase}
+                                className="text-white bg-white/10 hover:bg-white/20 p-2 rounded-full transition-colors flex items-center justify-center size-10"
+                                title="Actualizar App y Base de Datos"
+                            >
+                                <span className="material-symbols-outlined text-xl">cloud_sync</span>
+                            </button>
+                            <button 
+                                onClick={handleLogout}
+                                className="text-white bg-white/10 hover:bg-red-500/50 p-2 rounded-full transition-colors flex items-center justify-center size-10"
+                                title="Cerrar Sesión"
+                            >
+                                <span className="material-symbols-outlined text-xl">logout</span>
+                            </button>
+                        </div>
                     </div>
                 )}
             </header>
