@@ -3,9 +3,10 @@ import React, { useState } from 'react';
 
 interface LoginScreenProps {
   onLogin: (mode: 'guest' | 'admin') => void;
+  onUpdate: () => void;
 }
 
-const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
+const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onUpdate }) => {
   const [showAdminInput, setShowAdminInput] = useState(false);
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -24,10 +25,6 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       if (e.key === 'Enter') {
           handleAdminLogin();
       }
-  };
-
-  const handleUpdate = () => {
-    window.open("https://github.com/google/gemini-api-cookbook", "_blank", "noopener,noreferrer");
   };
 
   return (
@@ -122,7 +119,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
 
        <div className="w-full flex justify-center p-8 z-10 shrink-0 mt-4">
             <button 
-                onClick={handleUpdate}
+                onClick={onUpdate}
                 className="flex items-center gap-2 text-gray-500 dark:text-gray-400 text-xs font-bold uppercase tracking-wider hover:text-primary transition-colors"
             >
                 <span className="material-symbols-outlined text-lg">system_update</span>

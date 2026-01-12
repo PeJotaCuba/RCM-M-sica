@@ -82,6 +82,37 @@ const App: React.FC = () => {
     setView(ViewState.LIST);
   };
 
+  const handleLogout = () => {
+      setAuthMode(null);
+      setView(ViewState.LOGIN);
+      setSelectedTrack(null);
+      setRecentTracks([]);
+  };
+
+  const handleUpdateDatabase = async () => {
+      const confirmUpdate = window.confirm("¿Desea buscar actualizaciones en el servidor? Esto descargará la última versión de la base de datos y la combinará con sus datos locales.");
+      if (!confirmUpdate) return;
+
+      try {
+          // Fetch with timestamp to bypass cache
+          const response = await fetch(`./musica.json?t=${Date.now()}`);
+          if (!response.ok) {
+              throw new Error("No se encontró el archivo de base de datos en el servidor.");
+          }
+          const remoteData = await response.json();
+          
+          if (Array.isArray(remoteData) && remoteData.length > 0) {
+              mergeTracks(remoteData);
+              // Feedback handled inside mergeTracks via alert usually, or add explicit one here if mergeTracks is silent
+          } else {
+              alert("La base de datos del servidor está vacía.");
+          }
+      } catch (error) {
+          console.error("Update failed", error);
+          alert("Error al actualizar: Asegúrese de tener conexión a internet.");
+      }
+  };
+
   const handleSelectTrack = (track: Track) => {
     setSelectedTrack(track);
     setRecentTracks(prev => {
@@ -148,6 +179,8 @@ const App: React.FC = () => {
               });
 
               if (index >= 0) {
+                  // Optional: Check if incoming is "newer" or has more info. 
+                  // For now, assume incoming (server/import) overrides local if matches
                   merged[index] = {
                       ...merged[index],
                       metadata: { ...merged[index].metadata, ...incoming.metadata },
@@ -161,7 +194,7 @@ const App: React.FC = () => {
               }
           });
           
-          alert(`Importación completada.\nActualizados: ${updatedCount}\nAgregados: ${addedCount}`);
+          alert(`Base de datos sincronizada.\nActualizados: ${updatedCount}\nAgregados: ${addedCount}`);
           return merged;
       });
   };
@@ -251,7 +284,7 @@ const App: React.FC = () => {
   };
 
   if (view === ViewState.LOGIN) {
-      return <LoginScreen onLogin={handleLogin} />;
+      return <LoginScreen onLogin={handleLogin} onUpdate={handleUpdateDatabase} />;
   }
 
   return (
@@ -265,7 +298,23 @@ const App: React.FC = () => {
                     </h1>
                 </div>
                 {authMode === 'admin' && (
-                    <div className="bg-miel text-white text-[10px] font-bold px-2 py-0.5 rounded">ADMIN</div>
+                    <div className="flex items-center gap-2">
+                        <div className="bg-miel text-white text-[10px] font-bold px-2 py-0.5 rounded">ADMIN</div>
+                        <button 
+                            onClick={handleUpdateDatabase}
+                            className="text-white/80 hover:text-white transition-colors"
+                            title="Actualizar Base de Datos"
+                        >
+                            <span className="material-symbols-outlined text-lg">cloud_sync</span>
+                        </button>
+                        <button 
+                            onClick={handleLogout}
+                            className="text-white/80 hover:text-red-300 transition-colors"
+                            title="Cerrar Sesión"
+                        >
+                            <span className="material-symbols-outlined text-lg">logout</span>
+                        </button>
+                    </div>
                 )}
             </header>
         )}
@@ -298,7 +347,7 @@ const App: React.FC = () => {
             {view === ViewState.PRODUCTIONS && (
                 <Productions 
                     onAddTracks={handleAddProductionTracks} 
-                    allTracks={tracks} // Pass all tracks for reporting
+                    allTracks={tracks} 
                 />
             )}
 
