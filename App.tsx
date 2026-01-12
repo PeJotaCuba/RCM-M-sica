@@ -8,6 +8,7 @@ import CreditResults from './components/CreditResults';
 import LoginScreen from './components/LoginScreen';
 import Settings from './components/Settings';
 import { fetchCreditsFromGemini } from './services/geminiService';
+import * as XLSX from 'xlsx';
 
 const App: React.FC = () => {
   const [tracks, setTracks] = useState<Track[]>([]);
@@ -28,19 +29,22 @@ const App: React.FC = () => {
     fetch(`./musica.json?v=${new Date().getTime()}`)
       .then(response => {
         if (!response.ok) {
-          throw new Error('Network response was not ok');
+           return []; // If 404 or empty, return empty array
         }
         return response.json();
       })
       .then((data: Track[]) => {
-        console.log("Database loaded from musica.json");
-        setTracks(data);
+        if (Array.isArray(data) && data.length > 0) {
+            console.log("Database loaded from musica.json");
+            setTracks(data);
+        } else {
+            console.log("Database empty or not found, starting clean.");
+            setTracks([]); 
+        }
       })
       .catch(error => {
-        console.warn("Could not load musica.json, falling back to static data.", error);
-        // Fallback to constants if file doesn't exist or fails
-        const parsed = parseTxtDatabase(INITIAL_DB_CONTENT);
-        setTracks(parsed);
+        console.warn("Error loading musica.json", error);
+        setTracks([]); // Start empty on error
       });
   }, []);
 
@@ -96,99 +100,143 @@ const App: React.FC = () => {
       setFoundCredits(null);
   };
 
-  // --- Real File Import Logic ---
-
-  const readFileContent = (file: File): Promise<string> => {
-      return new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = (event) => resolve(event.target?.result as string);
-          reader.onerror = (error) => reject(error);
-          reader.readAsText(file);
-      });
-  };
+  // --- Real File Import Logic (Excel) ---
 
   const handleImportFolders = async (file: File) => {
       if (!file) return;
       
       try {
-          const text = await readFileContent(file);
-          let newTracks: Track[] = [];
+          const data = await file.arrayBuffer();
+          const workbook = XLSX.read(data);
+          const firstSheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[firstSheetName];
+          
+          // Parse as array of arrays to handle columns by index
+          // Option '1' produces array of arrays (e.g., [["Name", "Path", "Title"], ["Val1", "Val2", "Val3"]])
+          const rows: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
-          // Try parsing as JSON first
-          try {
-              const json = JSON.parse(text);
-              if (Array.isArray(json)) {
-                  newTracks = json;
-              } else {
-                  throw new Error("JSON no es un array");
+          if (rows.length < 2) {
+              alert("El archivo parece vacío o no tiene datos.");
+              return;
+          }
+
+          // Convert rows to Track objects
+          // Assumptions based on PDF:
+          // Col 0: "Nombre de Carpeta" (Folder Name / Group) -> Mapped to 'album' usually or just tag
+          // Col 1: "Ruta de Carpeta" (Full Path) -> Mapped to 'path'
+          // Col 2: "Título del Tema Musical" -> Mapped to 'title' and used for 'filename' if possible
+
+          const newTracks: Track[] = [];
+
+          // Skip header row if it looks like a header
+          let startIndex = 0;
+          if (rows[0][0] && typeof rows[0][0] === 'string' && rows[0][0].toLowerCase().includes('nombre')) {
+              startIndex = 1;
+          }
+
+          for (let i = startIndex; i < rows.length; i++) {
+              const row = rows[i];
+              // Ensure row has at least path
+              if (!row[1]) continue;
+
+              const folderName = String(row[0] || "");
+              const fullPath = String(row[1] || "").trim(); // PDF Col 2: Ruta
+              const rawTitle = String(row[2] || "").trim(); // PDF Col 3: Título
+
+              // Heuristic to get filename: last part of path, OR use title if it ends in extension
+              let filename = rawTitle;
+              if (!filename.match(/\.[0-9a-z]+$/i)) {
+                   // If title doesn't look like a file, check path
+                   const pathParts = fullPath.split(/[\\/]/);
+                   const lastPart = pathParts[pathParts.length - 1];
+                   if (lastPart.match(/\.[0-9a-z]+$/i)) {
+                       filename = lastPart;
+                   } else {
+                       filename = rawTitle + ".mp3"; // Fallback assumption
+                   }
               }
-          } catch (e) {
-              // Fallback to TXT format
-              console.log("Detectado formato TXT o error en JSON, parseando texto plano...");
-              newTracks = parseTxtDatabase(text);
+
+              // Clean Title (remove extension)
+              const cleanTitle = rawTitle.replace(/\.[^/.]+$/, "") || filename.replace(/\.[^/.]+$/, "");
+
+              newTracks.push({
+                  id: `imp-${Date.now()}-${i}`,
+                  filename: filename,
+                  path: fullPath, // Keep full path from Excel
+                  size: '---',
+                  isVerified: false, // Imported from folder list is usually unverified until AI check
+                  metadata: {
+                      title: cleanTitle,
+                      author: '', // Not provided in this Excel format
+                      performer: '', // Not provided
+                      album: folderName, // Use "Nombre de Carpeta" as Album/Group context
+                      year: ''
+                  }
+              });
           }
 
           if (newTracks.length > 0) {
-              if (window.confirm(`Se han detectado ${newTracks.length} archivos. ¿Deseas reemplazar la base de datos actual?`)) {
+              if (window.confirm(`Se encontraron ${newTracks.length} pistas. ¿Reemplazar base de datos?`)) {
                   setTracks(newTracks);
-                  alert("Base de datos de carpetas actualizada correctamente.");
+                  alert("Base de datos cargada exitosamente.");
               }
           } else {
-              alert("No se pudieron leer pistas del archivo.");
+              alert("No se pudieron interpretar las filas del Excel.");
           }
 
       } catch (error) {
-          console.error("Error importando:", error);
-          alert("Error leyendo el archivo.");
+          console.error("Error importando excel:", error);
+          alert("Error leyendo el archivo Excel. Asegúrese de que sea un .xlsx válido.");
       }
   };
 
   const handleImportCredits = async (file: File) => {
+      // For credits, we assume a similar logic or standard Excel parsing
       if (!file) return;
 
       try {
-          const text = await readFileContent(file);
-          let importedTracks: Track[] = [];
+          const data = await file.arrayBuffer();
+          const workbook = XLSX.read(data);
+          const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+          const json: any[] = XLSX.utils.sheet_to_json(worksheet); // Map by headers
 
-          try {
-              const json = JSON.parse(text);
-              if (Array.isArray(json)) importedTracks = json;
-          } catch (e) {
-              importedTracks = parseTxtDatabase(text);
+          if (json.length === 0) {
+               alert("No se encontraron datos.");
+               return;
           }
-
-          if (importedTracks.length === 0) {
-              alert("No se encontraron datos válidos para importar.");
-              return;
-          }
-
-          // Logic: Update metadata of EXISTING tracks if filenames match
+          
           let updatedCount = 0;
-          const updatedTracks = tracks.map(existingTrack => {
-              const match = importedTracks.find(t => 
-                  t.filename.trim().toLowerCase() === existingTrack.filename.trim().toLowerCase()
-              );
-              
-              if (match && (match.metadata.title || match.metadata.author)) {
+          const updatedTracks = tracks.map(t => {
+              // Try to find match by filename
+              const match = json.find((row: any) => {
+                  const rowFilename = row['filename'] || row['Archivo'] || row['Nombre'];
+                  return rowFilename && String(rowFilename).trim() === t.filename.trim();
+              });
+
+              if (match) {
                   updatedCount++;
                   return {
-                      ...existingTrack,
+                      ...t,
                       isVerified: true,
                       metadata: {
-                          ...existingTrack.metadata,
-                          ...match.metadata // Overwrite with imported data
+                          ...t.metadata,
+                          title: match['Title'] || match['Título'] || t.metadata.title,
+                          author: match['Author'] || match['Autor'] || t.metadata.author,
+                          performer: match['Performer'] || match['Intérprete'] || t.metadata.performer,
+                          year: match['Year'] || match['Año'] || t.metadata.year,
+                          album: match['Album'] || match['Álbum'] || t.metadata.album
                       }
                   };
               }
-              return existingTrack;
+              return t;
           });
 
           setTracks(updatedTracks);
-          alert(`Proceso finalizado. Se actualizaron los créditos de ${updatedCount} archivos coincidentes.`);
+          alert(`Créditos actualizados en ${updatedCount} archivos.`);
 
       } catch (error) {
-          console.error("Error importando créditos:", error);
-          alert("Error procesando el archivo de créditos.");
+          console.error(error);
+          alert("Error importando créditos.");
       }
   };
 

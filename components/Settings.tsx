@@ -1,5 +1,7 @@
-import React from 'react';
+
+import React, { useState } from 'react';
 import { Track } from '../types';
+import * as XLSX from 'xlsx';
 
 interface SettingsProps {
   tracks: Track[];
@@ -8,7 +10,8 @@ interface SettingsProps {
 }
 
 const Settings: React.FC<SettingsProps> = ({ tracks, onImportFolders, onImportCredits }) => {
-  
+  const [isProcessing, setIsProcessing] = useState(false);
+
   const handleDownloadJson = () => {
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(tracks, null, 2));
     const downloadAnchorNode = document.createElement('a');
@@ -21,8 +24,13 @@ const Settings: React.FC<SettingsProps> = ({ tracks, onImportFolders, onImportCr
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, type: 'folders' | 'credits') => {
     if (e.target.files && e.target.files[0]) {
-        if (type === 'folders') onImportFolders(e.target.files[0]);
-        else onImportCredits(e.target.files[0]);
+        setIsProcessing(true);
+        // Small timeout to allow UI to update loading state
+        setTimeout(() => {
+            if (type === 'folders') onImportFolders(e.target.files![0]);
+            else onImportCredits(e.target.files![0]);
+            setIsProcessing(false);
+        }, 100);
     }
   };
 
@@ -30,35 +38,49 @@ const Settings: React.FC<SettingsProps> = ({ tracks, onImportFolders, onImportCr
     <div className="flex flex-col h-full bg-background-light dark:bg-background-dark p-6 overflow-y-auto pb-24">
         <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Ajustes</h2>
         
+        {isProcessing && (
+            <div className="fixed inset-0 bg-black/20 z-50 flex items-center justify-center backdrop-blur-sm">
+                <div className="bg-white p-4 rounded-xl shadow-xl flex items-center gap-3">
+                    <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+                    <span className="font-bold text-gray-700">Procesando archivo...</span>
+                </div>
+            </div>
+        )}
+
         <div className="space-y-6">
             <div className="bg-white dark:bg-white/5 p-6 rounded-xl border border-gray-200 dark:border-white/10 shadow-sm">
                 <div className="flex items-center gap-3 mb-4 text-azul-header dark:text-blue-400">
                     <span className="material-symbols-outlined">folder_managed</span>
-                    <h3 className="font-bold">Gestión de Carpetas</h3>
+                    <h3 className="font-bold">Importar Carpetas (Excel)</h3>
                 </div>
-                <p className="text-sm text-gray-500 mb-4">Carga un archivo .txt o .xlsx con la estructura de carpetas.</p>
-                <label className="block w-full">
-                    <span className="sr-only">Elegir archivo</span>
-                    <input type="file" accept=".txt,.xlsx" 
+                <p className="text-sm text-gray-500 mb-4">
+                    Carga el archivo .xlsx con las columnas: <br/>
+                    <b>Nombre de Carpeta | Ruta de Carpeta | Título</b>
+                </p>
+                <label className="block w-full cursor-pointer group">
+                    <div className="flex items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                        <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                            <span className="material-symbols-outlined text-gray-400 text-3xl mb-2 group-hover:text-primary transition-colors">upload_file</span>
+                            <p className="mb-2 text-sm text-gray-500 dark:text-gray-400"><span className="font-semibold">Clic para subir Excel</span></p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">XLSX, XLS</p>
+                        </div>
+                    </div>
+                    <input type="file" accept=".xlsx, .xls" 
                         onChange={(e) => handleFileChange(e, 'folders')}
-                        className="block w-full text-sm text-gray-500
-                        file:mr-4 file:py-2 file:px-4
-                        file:rounded-full file:border-0
-                        file:text-xs file:font-semibold
-                        file:bg-azul-header file:text-white
-                        hover:file:bg-azul-cauto
-                    "/>
+                        className="hidden"
+                    />
                 </label>
             </div>
 
             <div className="bg-white dark:bg-white/5 p-6 rounded-xl border border-gray-200 dark:border-white/10 shadow-sm">
                  <div className="flex items-center gap-3 mb-4 text-miel">
                     <span className="material-symbols-outlined">library_music</span>
-                    <h3 className="font-bold">Créditos Musicales</h3>
+                    <h3 className="font-bold">Actualizar Créditos</h3>
                 </div>
-                <p className="text-sm text-gray-500 mb-4">Importar base de datos de créditos masivos.</p>
+                <p className="text-sm text-gray-500 mb-4">Importar metadatos adicionales (.xlsx) para archivos existentes.</p>
                 <label className="block w-full">
-                    <input type="file" accept=".txt,.xlsx" 
+                     <span className="sr-only">Elegir archivo</span>
+                    <input type="file" accept=".xlsx, .xls" 
                         onChange={(e) => handleFileChange(e, 'credits')}
                         className="block w-full text-sm text-gray-500
                         file:mr-4 file:py-2 file:px-4
@@ -66,6 +88,7 @@ const Settings: React.FC<SettingsProps> = ({ tracks, onImportFolders, onImportCr
                         file:text-xs file:font-semibold
                         file:bg-miel file:text-white
                         hover:file:bg-yellow-600
+                        cursor-pointer
                     "/>
                 </label>
             </div>
