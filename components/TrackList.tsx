@@ -12,43 +12,94 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
   const [activeFilter, setActiveFilter] = useState<FilterType>('folder'); 
   const [currentFolder, setCurrentFolder] = useState<string | null>(null);
 
-  // Reset folder view when changing filter
+  // Reset folder view and search when changing filter tab
   const handleFilterChange = (filter: FilterType) => {
       setActiveFilter(filter);
       setCurrentFolder(null);
       setSearchQuery('');
   };
 
+  const handleClearSearch = () => {
+      setSearchQuery('');
+  };
+
   const listItems = useMemo(() => {
-    const query = searchQuery.toLowerCase();
+    const query = searchQuery.toLowerCase().trim();
     
-    // Filter tracks by query (global filtering base)
-    const matches = tracks.filter(t => 
-       t.filename.toLowerCase().includes(query) ||
-       t.path.toLowerCase().includes(query) ||
-       t.metadata.title.toLowerCase().includes(query) ||
-       t.metadata.author.toLowerCase().includes(query) ||
-       t.metadata.performer.toLowerCase().includes(query) ||
-       t.metadata.album.toLowerCase().includes(query)
-    );
+    // --- MODO BÚSQUEDA GLOBAL ---
+    if (query) {
+        const results = [];
+        const addedIds = new Set();
+
+        // 1. Buscar Carpetas que coincidan
+        const folderMatches = new Map<string, Track[]>();
+        tracks.forEach(t => {
+            const folderName = t.metadata.album || "Sin Carpeta";
+            if (folderName.toLowerCase().includes(query)) {
+                if (!folderMatches.has(folderName)) folderMatches.set(folderName, []);
+                folderMatches.get(folderName)!.push(t);
+            }
+        });
+
+        // Convertir carpetas encontradas a items
+        Array.from(folderMatches.entries()).forEach(([folderName, folderTracks]) => {
+            results.push({
+                id: `folder-${folderName}`,
+                mainText: folderName,
+                subText: `${folderTracks.length} temas coincidentes por carpeta`,
+                type: 'folder',
+                payload: folderName
+            });
+            addedIds.add(`folder-${folderName}`);
+        });
+
+        // 2. Buscar Pistas individuales que coincidan (Título, Autor, Intérprete, Archivo)
+        const trackMatches = tracks.filter(t => 
+            t.filename.toLowerCase().includes(query) ||
+            t.metadata.title.toLowerCase().includes(query) ||
+            t.metadata.author.toLowerCase().includes(query) ||
+            t.metadata.performer.toLowerCase().includes(query)
+        );
+
+        trackMatches.forEach(t => {
+            // Evitar duplicados si ya mostramos la carpeta (opcional, pero el usuario pidió "si aparece nombre de carpeta y tema, mostrar los dos")
+            // Aquí mostramos el tema individualmente
+            results.push({
+                id: t.id,
+                mainText: t.metadata.title || t.filename,
+                subText: t.metadata.performer || "Intérprete desconocido",
+                type: 'track',
+                payload: t,
+                path: t.path
+            });
+        });
+
+        return results;
+    }
+
+    // --- MODO NAVEGACIÓN NORMAL (Sin búsqueda) ---
+    
+    // Filtro base (si estamos dentro de una carpeta, filtramos por ella)
+    let viewTracks = tracks;
+    if (activeFilter === 'folder' && currentFolder) {
+        viewTracks = tracks.filter(t => (t.metadata.album || "Sin Carpeta") === currentFolder);
+    }
 
     if (activeFilter === 'folder') {
         if (currentFolder) {
-            // Inside a folder: show tracks belonging to this folder matching query
-            return matches
-                .filter(t => (t.metadata.album || "Sin Carpeta") === currentFolder)
-                .map(t => ({
-                    id: t.id,
-                    mainText: t.metadata.title || t.filename,
-                    subText: t.metadata.performer || "Intérprete desconocido",
-                    type: 'track',
-                    payload: t,
-                    path: t.path
-                }));
+            // Vista DENTRO de carpeta
+            return viewTracks.map(t => ({
+                id: t.id,
+                mainText: t.metadata.title || t.filename,
+                subText: t.metadata.performer || "Intérprete desconocido",
+                type: 'track',
+                payload: t,
+                path: t.path
+            }));
         } else {
-            // Folder List View: Show folders that contain matching tracks
+            // Vista LISTA de carpetas
             const uniqueFolders = new Map<string, Track[]>();
-            matches.forEach(t => {
+            viewTracks.forEach(t => {
                 const folderName = t.metadata.album || "Sin Carpeta";
                 if (!uniqueFolders.has(folderName)) uniqueFolders.set(folderName, []);
                 uniqueFolders.get(folderName)!.push(t);
@@ -65,7 +116,7 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
                 }));
         }
     } else if (activeFilter === 'title') {
-        return matches.map(t => ({
+        return viewTracks.map(t => ({
             id: t.id,
             mainText: t.metadata.title || t.filename,
             subText: t.metadata.performer || "Intérprete desconocido",
@@ -74,22 +125,22 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
             path: t.path
         }));
     } else if (activeFilter === 'author') {
-        const authors = Array.from(new Set(matches.map(t => t.metadata.author).filter(Boolean)));
+        const authors = Array.from(new Set(viewTracks.map(t => t.metadata.author).filter(Boolean)));
         return authors.sort().map(author => ({
             id: `auth-${author}`,
             mainText: author,
             subText: "Autor / Compositor",
             type: 'author',
-            payload: matches.find(t => t.metadata.author === author)!
+            payload: viewTracks.find(t => t.metadata.author === author)!
         }));
     } else if (activeFilter === 'performer') {
-        const performers = Array.from(new Set(matches.map(t => t.metadata.performer).filter(Boolean)));
+        const performers = Array.from(new Set(viewTracks.map(t => t.metadata.performer).filter(Boolean)));
         return performers.sort().map(perf => ({
             id: `perf-${perf}`,
             mainText: perf,
             subText: "Intérprete",
             type: 'performer',
-            payload: matches.find(t => t.metadata.performer === perf)!
+            payload: viewTracks.find(t => t.metadata.performer === perf)!
         }));
     }
     return [];
@@ -97,12 +148,12 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
 
   const handleItemClick = (item: any) => {
       if (item.type === 'folder') {
+          // Si estamos buscando, al hacer clic en carpeta entramos en ella y limpiamos búsqueda
+          if (searchQuery) {
+              setSearchQuery('');
+              setActiveFilter('folder');
+          }
           setCurrentFolder(item.payload);
-          setSearchQuery(''); // Clear search to see all tracks in folder initially, or keep it? 
-          // User said: "deja buscar intacto". But if we dive in, search might result in 0 items if search was "Folder A".
-          // Usually drill down implies resetting context, but if query was "Love", we might want to see "Love" songs in "Folder A".
-          // Let's keep search query for continuity if it makes sense, but user feedback suggests they want simple navigation.
-          // Resetting search is safer for drill down.
       } else {
           onSelectTrack(item.payload);
       }
@@ -129,10 +180,11 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
           </div>
 
           <div className="flex gap-2 items-center">
-            {activeFilter === 'folder' && currentFolder && (
+            {activeFilter === 'folder' && currentFolder && !searchQuery && (
                 <button 
                     onClick={() => setCurrentFolder(null)}
                     className="size-12 flex items-center justify-center bg-gray-100 dark:bg-gray-800 rounded-xl text-primary hover:bg-gray-200"
+                    title="Volver a Carpetas"
                 >
                     <span className="material-symbols-outlined">arrow_back</span>
                 </button>
@@ -145,10 +197,18 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
                 </div>
                 <input 
                     className="flex w-full border-none bg-transparent text-gray-900 dark:text-white focus:ring-0 placeholder:text-gray-400 px-3 text-base font-normal leading-normal" 
-                    placeholder={currentFolder ? `Buscar en ${currentFolder}...` : "Buscar..."}
+                    placeholder={currentFolder && !searchQuery ? `Explorando: ${currentFolder}` : "Buscar general..."}
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                 />
+                {searchQuery && (
+                    <button 
+                        onClick={handleClearSearch}
+                        className="pr-4 text-gray-400 hover:text-gray-600 flex items-center"
+                    >
+                        <span className="material-symbols-outlined text-lg">close</span>
+                    </button>
+                )}
                 </div>
             </label>
           </div>
@@ -169,9 +229,9 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
               onClick={() => handleItemClick(item)}
               className="group flex items-center gap-4 bg-white dark:bg-background-dark px-4 py-4 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer active:scale-[0.99]"
             >
-              <div className={`flex items-center justify-center rounded-xl shrink-0 size-12 border ${activeFilter === 'title' || (activeFilter === 'folder' && currentFolder) ? 'bg-primary/10 border-primary/20 text-primary' : (activeFilter === 'folder' ? 'bg-miel/10 border-miel/20 text-miel' : 'bg-gray-100 border-gray-200 text-gray-600')}`}>
+              <div className={`flex items-center justify-center rounded-xl shrink-0 size-12 border ${item.type === 'track' ? 'bg-primary/10 border-primary/20 text-primary' : 'bg-miel/10 border-miel/20 text-miel'}`}>
                 <span className="material-symbols-outlined">
-                    {activeFilter === 'title' || (activeFilter === 'folder' && currentFolder) ? 'music_note' : (activeFilter === 'folder' ? 'folder' : (activeFilter === 'author' ? 'person_edit' : 'mic_external_on'))}
+                    {item.type === 'folder' ? 'folder' : (activeFilter === 'author' ? 'person_edit' : (activeFilter === 'performer' ? 'mic_external_on' : 'music_note'))}
                 </span>
               </div>
               <div className="flex flex-col flex-1 min-w-0">
@@ -184,7 +244,7 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
               </div>
               
               <div className="shrink-0 flex items-center gap-2">
-                 {/* Copy Path Button - restored */}
+                 {/* Copy Path Button */}
                  {item.type === 'track' && item.path && (
                      <button 
                         onClick={(e) => copyToClipboard(item.path, e)}
@@ -196,7 +256,7 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
                  )}
                  
                  <span className="material-symbols-outlined text-gray-300 dark:text-gray-600">
-                     {activeFilter === 'folder' && !currentFolder ? 'chevron_right' : 'visibility'}
+                     {item.type === 'folder' ? 'chevron_right' : 'visibility'}
                  </span>
               </div>
             </div>
