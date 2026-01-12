@@ -24,8 +24,8 @@ const App: React.FC = () => {
 
   // Initialize DB
   useEffect(() => {
-    // Try to load from musica.json first
-    fetch('./musica.json')
+    // Try to load from musica.json first with cache busting
+    fetch(`./musica.json?v=${new Date().getTime()}`)
       .then(response => {
         if (!response.ok) {
           throw new Error('Network response was not ok');
