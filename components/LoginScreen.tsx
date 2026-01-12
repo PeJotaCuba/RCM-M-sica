@@ -9,6 +9,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   const [showAdminInput, setShowAdminInput] = useState(false);
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [logoError, setLogoError] = useState(false);
 
   const handleAdminLogin = () => {
     if (password === 'RCMM26') {
@@ -31,13 +32,22 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
        <div className="flex-1 flex flex-col items-center justify-center p-6 z-10 w-full overflow-y-auto">
           <div className="w-full max-w-xs flex flex-col items-center space-y-8 my-auto">
              <div className="text-center">
-                {/* Contenedor del Logo usando archivo local logo.png */}
+                {/* Contenedor del Logo con Fallback */}
                 <div className="w-48 h-48 mx-auto mb-4 relative flex items-center justify-center">
-                   <img 
-                       src="logo.png" 
-                       alt="RCM Música Logo" 
-                       className="w-full h-full object-contain drop-shadow-xl animate-fade-in"
-                   />
+                   {!logoError ? (
+                       <img 
+                           src="./logo.png" 
+                           alt="RCM Música Logo" 
+                           className="w-full h-full object-contain drop-shadow-xl animate-fade-in"
+                           onError={() => setLogoError(true)}
+                       />
+                   ) : (
+                       <div className="w-full h-full flex flex-col items-center justify-center bg-white/10 rounded-full border-4 border-miel/30">
+                           <span className="material-symbols-outlined text-8xl text-primary drop-shadow-md">
+                               radio
+                           </span>
+                       </div>
+                   )}
                 </div>
                 <h1 className="text-3xl font-bold text-gray-900 dark:text-white tracking-tight">RCM Música</h1>
              </div>

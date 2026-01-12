@@ -56,8 +56,6 @@ const App: React.FC = () => {
         const filtered = prev.filter(t => t.id !== track.id);
         return [track, ...filtered].slice(0, 10); // Keep last 10
     });
-    // Requirement: "Cuadro superpuesto" means we might not change full view state if we want to keep list visible behind?
-    // But for this architecture, we render the Modal ON TOP of the list.
   };
 
   const handleCloseDetail = () => {
@@ -94,20 +92,104 @@ const App: React.FC = () => {
   };
 
   const handleDiscardResults = () => {
-      // Return to List with Modal Open? Or just List?
-      // Prompt says "Back to detail", but let's just go back to List to keep it clean, 
-      // or re-open modal. Let's re-open modal.
       setView(ViewState.LIST);
-      // selectedTrack is still set, so modal renders
       setFoundCredits(null);
   };
 
-  // Mock Settings Functions
-  const handleImportFolders = (file: File) => {
-      alert(`Simulando importación de carpetas desde ${file.name}`);
+  // --- Real File Import Logic ---
+
+  const readFileContent = (file: File): Promise<string> => {
+      return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (event) => resolve(event.target?.result as string);
+          reader.onerror = (error) => reject(error);
+          reader.readAsText(file);
+      });
   };
-  const handleImportCredits = (file: File) => {
-      alert(`Simulando importación de créditos desde ${file.name}`);
+
+  const handleImportFolders = async (file: File) => {
+      if (!file) return;
+      
+      try {
+          const text = await readFileContent(file);
+          let newTracks: Track[] = [];
+
+          // Try parsing as JSON first
+          try {
+              const json = JSON.parse(text);
+              if (Array.isArray(json)) {
+                  newTracks = json;
+              } else {
+                  throw new Error("JSON no es un array");
+              }
+          } catch (e) {
+              // Fallback to TXT format
+              console.log("Detectado formato TXT o error en JSON, parseando texto plano...");
+              newTracks = parseTxtDatabase(text);
+          }
+
+          if (newTracks.length > 0) {
+              if (window.confirm(`Se han detectado ${newTracks.length} archivos. ¿Deseas reemplazar la base de datos actual?`)) {
+                  setTracks(newTracks);
+                  alert("Base de datos de carpetas actualizada correctamente.");
+              }
+          } else {
+              alert("No se pudieron leer pistas del archivo.");
+          }
+
+      } catch (error) {
+          console.error("Error importando:", error);
+          alert("Error leyendo el archivo.");
+      }
+  };
+
+  const handleImportCredits = async (file: File) => {
+      if (!file) return;
+
+      try {
+          const text = await readFileContent(file);
+          let importedTracks: Track[] = [];
+
+          try {
+              const json = JSON.parse(text);
+              if (Array.isArray(json)) importedTracks = json;
+          } catch (e) {
+              importedTracks = parseTxtDatabase(text);
+          }
+
+          if (importedTracks.length === 0) {
+              alert("No se encontraron datos válidos para importar.");
+              return;
+          }
+
+          // Logic: Update metadata of EXISTING tracks if filenames match
+          let updatedCount = 0;
+          const updatedTracks = tracks.map(existingTrack => {
+              const match = importedTracks.find(t => 
+                  t.filename.trim().toLowerCase() === existingTrack.filename.trim().toLowerCase()
+              );
+              
+              if (match && (match.metadata.title || match.metadata.author)) {
+                  updatedCount++;
+                  return {
+                      ...existingTrack,
+                      isVerified: true,
+                      metadata: {
+                          ...existingTrack.metadata,
+                          ...match.metadata // Overwrite with imported data
+                      }
+                  };
+              }
+              return existingTrack;
+          });
+
+          setTracks(updatedTracks);
+          alert(`Proceso finalizado. Se actualizaron los créditos de ${updatedCount} archivos coincidentes.`);
+
+      } catch (error) {
+          console.error("Error importando créditos:", error);
+          alert("Error procesando el archivo de créditos.");
+      }
   };
 
   if (view === ViewState.LOGIN) {
@@ -117,7 +199,7 @@ const App: React.FC = () => {
   return (
     <div className="max-w-md mx-auto h-screen bg-gray-100 shadow-2xl overflow-hidden relative border-x border-gray-200 flex flex-col">
         
-        {/* Header (Only show in List, Recent, Settings) */}
+        {/* Header */}
         {view !== ViewState.RESULTS && (
              <header className="bg-azul-header text-white px-4 py-4 flex items-center justify-between shadow-md relative z-20 shrink-0">
                 <div className="flex items-center gap-3">
@@ -170,7 +252,7 @@ const App: React.FC = () => {
             )}
         </div>
 
-        {/* Detail Modal Overlay (Available in List or Recent) */}
+        {/* Detail Modal Overlay */}
         {(view === ViewState.LIST || view === ViewState.RECENT) && selectedTrack && (
             <TrackDetail 
                 track={selectedTrack} 
@@ -179,7 +261,7 @@ const App: React.FC = () => {
             />
         )}
         
-        {/* Bottom Navigation (Requirement 4) */}
+        {/* Bottom Navigation */}
         {view !== ViewState.RESULTS && (
             <nav className="bg-white dark:bg-background-dark border-t border-gray-200 dark:border-gray-800 h-20 px-6 flex items-center justify-between pb-2 z-20 shrink-0">
                 <button 

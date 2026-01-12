@@ -1,3 +1,4 @@
+
 import { Track } from "./types";
 
 // Simulating the content of the "base de datos proporcionada desde la administración en formato txt"
@@ -13,13 +14,22 @@ export const INITIAL_DB_CONTENT = `
 
 export const parseTxtDatabase = (txt: string): Track[] => {
   const lines = txt.trim().split('\n');
-  return lines.map(line => {
-    const [id, filename, path, title, author, performer, album, year] = line.split('|');
+  return lines.map((line, index) => {
+    // Basic CSV/Pipe handling
+    const parts = line.split('|');
+    // Ensure we have enough parts, fill with empty strings if not
+    const safeParts = [...parts, ...Array(8).fill('')];
+
+    const [id, filename, path, title, author, performer, album, year] = safeParts;
+
+    // Generate a temporary ID if missing, based on index or timestamp
+    const safeId = id && id.trim() !== '' ? id : `import-${Date.now()}-${index}`;
+
     return {
-      id,
-      filename: filename || 'Unknown',
-      path: path || '/unknown',
-      size: 'Unknown', // This would come from file system in real app
+      id: safeId,
+      filename: filename || 'Archivo_Desconocido.mp3',
+      path: path || '/ruta/desconocida',
+      size: 'Unknown', 
       isVerified: !!(title && author && performer && album && year),
       metadata: {
         title: title || '',
