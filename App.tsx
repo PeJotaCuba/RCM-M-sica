@@ -12,6 +12,7 @@ import { fetchCreditsFromGemini } from './services/geminiService';
 import * as XLSX from 'xlsx';
 
 const DB_KEY = 'rcm_db_tracks';
+const AUTH_KEY = 'rcm_auth_session';
 
 const App: React.FC = () => {
   const [tracks, setTracks] = useState<Track[]>([]);
@@ -39,10 +40,10 @@ const App: React.FC = () => {
       });
   };
 
-  // Initialize DB
+  // Initialize DB and Restore Session
   useEffect(() => {
+    // 1. Restore Database
     const loadDB = async () => {
-        // 1. Try Local Storage first
         const localData = localStorage.getItem(DB_KEY);
         if (localData) {
             try {
@@ -50,40 +51,47 @@ const App: React.FC = () => {
                 if (Array.isArray(parsed) && parsed.length > 0) {
                     setTracks(parsed);
                     console.log("Cargado desde Local Storage");
-                    return; // Stop if local data exists
+                    return; 
                 }
             } catch (e) {
                 console.warn("Datos locales corruptos");
             }
         }
 
-        // 2. Fallback to json file if no local data (Try GitHub as fallback if local is empty)
+        // Fallback to remote if local is empty
         try {
-            // Using GitHub raw link provided by user
             const response = await fetch(`https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/musica.json?v=${new Date().getTime()}`);
             if (response.ok) {
                 const data = await response.json();
                 if (Array.isArray(data) && data.length > 0) {
                     setTracks(data);
-                    // Save to local for next time
                     localStorage.setItem(DB_KEY, JSON.stringify(data));
                 }
-            } else {
-                console.log("Iniciando con base de datos vacía o sin conexión.");
             }
         } catch (error) {
-            console.log("Base de datos remota no disponible, iniciando limpio.");
+            console.log("Iniciando limpio (sin conexión remota inicial).");
         }
     };
     loadDB();
+
+    // 2. Restore Session
+    const savedAuth = localStorage.getItem(AUTH_KEY);
+    if (savedAuth === 'admin' || savedAuth === 'guest') {
+        setAuthMode(savedAuth as AuthMode);
+        setView(ViewState.LIST);
+    }
   }, []);
 
   const handleLogin = (mode: 'guest' | 'admin') => {
+    localStorage.setItem(AUTH_KEY, mode);
     setAuthMode(mode);
     setView(ViewState.LIST);
   };
 
   const handleLogout = () => {
+      // Clear session
+      localStorage.removeItem(AUTH_KEY);
+      
       setAuthMode(null);
       setView(ViewState.LOGIN);
       setSelectedTrack(null);
