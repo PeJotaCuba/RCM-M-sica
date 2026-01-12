@@ -11,7 +11,6 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onUpdate }) => {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
-  const [logoError, setLogoError] = useState(false);
 
   const handleAdminLogin = () => {
     if (password === 'RCMM26') {
@@ -35,20 +34,11 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onUpdate }) => {
           <div className="w-full max-w-xs flex flex-col items-center space-y-8 my-auto">
              <div className="text-center">
                 <div className="w-48 h-48 mx-auto mb-4 relative flex items-center justify-center">
-                   {!logoError ? (
-                       <img 
-                           src="./logo.png" 
-                           alt="RCM Música Logo" 
-                           className="w-full h-full object-contain drop-shadow-xl animate-fade-in"
-                           onError={() => setLogoError(true)}
-                       />
-                   ) : (
-                       <div className="w-full h-full flex flex-col items-center justify-center bg-white/10 rounded-full border-4 border-miel/30">
-                           <span className="material-symbols-outlined text-8xl text-primary drop-shadow-md">
-                               radio
-                           </span>
-                       </div>
-                   )}
+                   <div className="w-full h-full flex flex-col items-center justify-center bg-white/10 rounded-full border-4 border-miel/30 shadow-lg animate-fade-in">
+                       <span className="material-symbols-outlined text-8xl text-primary drop-shadow-md">
+                           radio
+                       </span>
+                   </div>
                 </div>
                 <h1 className="text-3xl font-bold text-gray-900 dark:text-white tracking-tight">RCM Música</h1>
              </div>

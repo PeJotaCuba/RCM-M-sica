@@ -40,36 +40,59 @@ const App: React.FC = () => {
       });
   };
 
+  // Function to fetch from GitHub with fallback URLs
+  const fetchFromGithub = async () => {
+      const urls = [
+          `https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/musica.json?t=${Date.now()}`, // User provided
+          `https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/main/musica.json?t=${Date.now()}` // Standard GitHub Raw
+      ];
+
+      for (const url of urls) {
+          try {
+              console.log("Intentando conectar a:", url);
+              const response = await fetch(url);
+              if (response.ok) {
+                  const data = await response.json();
+                  return data;
+              }
+          } catch (e) {
+              console.warn(`Fallo al conectar con ${url}`, e);
+          }
+      }
+      throw new Error("No se pudo conectar con ninguna de las URLs de GitHub.");
+  };
+
   // Initialize DB and Restore Session
   useEffect(() => {
     // 1. Restore Database
     const loadDB = async () => {
         const localData = localStorage.getItem(DB_KEY);
+        let loadedFromLocal = false;
+
         if (localData) {
             try {
                 const parsed = JSON.parse(localData);
                 if (Array.isArray(parsed) && parsed.length > 0) {
                     setTracks(parsed);
                     console.log("Cargado desde Local Storage");
-                    return; 
+                    loadedFromLocal = true;
                 }
             } catch (e) {
                 console.warn("Datos locales corruptos");
             }
         }
 
-        // Fallback to remote if local is empty
-        try {
-            const response = await fetch(`https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/musica.json?v=${new Date().getTime()}`);
-            if (response.ok) {
-                const data = await response.json();
+        // Si no hay datos locales, intentamos cargar de GitHub silenciosamente al inicio
+        if (!loadedFromLocal) {
+            try {
+                const data = await fetchFromGithub();
                 if (Array.isArray(data) && data.length > 0) {
                     setTracks(data);
                     localStorage.setItem(DB_KEY, JSON.stringify(data));
                 }
+            } catch (error) {
+                console.log("Iniciando limpio (sin conexión remota inicial).");
             }
-        } catch (error) {
-            console.log("Iniciando limpio (sin conexión remota inicial).");
         }
     };
     loadDB();
@@ -103,28 +126,24 @@ const App: React.FC = () => {
       if (!confirmUpdate) return;
 
       try {
-          // Fetch from GitHub RAW url provided by user
-          const response = await fetch(`https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/musica.json?t=${Date.now()}`);
+          const remoteData = await fetchFromGithub();
           
-          if (response.status === 404) {
-              console.warn("Archivo musica.json no encontrado en GitHub.");
-              alert("No se encontró el archivo 'musica.json' en la ruta especificada de GitHub (404).\n\nVerifique que el archivo exista en el repositorio.");
-          } else if (response.ok) {
-              const remoteData = await response.json();
-              if (Array.isArray(remoteData) && remoteData.length > 0) {
-                  // Merge logic saves to localStorage immediately
-                  mergeTracks(remoteData, true); 
+          if (Array.isArray(remoteData)) {
+              if (remoteData.length > 0) {
+                   // Merge logic saves to localStorage immediately
+                   mergeTracks(remoteData, true);
+                   alert(`Base de datos actualizada con éxito.\nSe encontraron ${remoteData.length} registros en GitHub.`);
               } else {
-                  alert("La base de datos de GitHub está vacía.");
+                  alert("Conexión exitosa con GitHub, pero el archivo 'musica.json' está vacío ([]).");
               }
           } else {
-              throw new Error(`Error del servidor: ${response.status}`);
+              throw new Error("El formato del archivo en GitHub no es una lista válida.");
           }
       } catch (error) {
           console.error("Update failed", error);
-          alert("Aviso: No se pudo conectar con GitHub (Error de red o CORS).\n\nSe recargará la aplicación para intentar actualizar el sistema.");
+          alert("Error de Conexión:\nNo se pudo descargar el archivo desde GitHub.\n\nPosibles causas:\n1. El archivo no existe en la rama 'main'.\n2. Problema de CORS o Red.\n3. El repositorio es privado y requiere token.");
       } finally {
-          // ALWAYS Reload to update App Version (Code)
+          // Reload to reflect changes clearly
           window.location.reload();
       }
   };
