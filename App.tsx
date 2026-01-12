@@ -43,8 +43,9 @@ const App: React.FC = () => {
   // Function to fetch from GitHub with fallback URLs
   const fetchFromGithub = async () => {
       const urls = [
-          `https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/musica.json?t=${Date.now()}`, // User provided
-          `https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/main/musica.json?t=${Date.now()}` // Standard GitHub Raw
+          `https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/musica.json?t=${Date.now()}`,
+          `https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/main/musica.json?t=${Date.now()}`,
+          `https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/master/musica.json?t=${Date.now()}`
       ];
 
       for (const url of urls) {
@@ -82,16 +83,19 @@ const App: React.FC = () => {
             }
         }
 
-        // Si no hay datos locales, intentamos cargar de GitHub silenciosamente al inicio
+        // Si no hay datos locales, usar la constante INITIAL_DB_CONTENT (Offline Fallback)
         if (!loadedFromLocal) {
             try {
-                const data = await fetchFromGithub();
-                if (Array.isArray(data) && data.length > 0) {
-                    setTracks(data);
-                    localStorage.setItem(DB_KEY, JSON.stringify(data));
+                if (INITIAL_DB_CONTENT && INITIAL_DB_CONTENT.trim() !== '') {
+                     const parsed = JSON.parse(INITIAL_DB_CONTENT);
+                     if (Array.isArray(parsed)) {
+                        setTracks(parsed);
+                        localStorage.setItem(DB_KEY, INITIAL_DB_CONTENT);
+                        console.log("Cargado desde Respaldo Offline (constants.ts)");
+                     }
                 }
             } catch (error) {
-                console.log("Iniciando limpio (sin conexión remota inicial).");
+                console.error("Error cargando base de datos inicial:", error);
             }
         }
     };
