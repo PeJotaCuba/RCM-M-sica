@@ -26,22 +26,24 @@ const App: React.FC = () => {
 
   // Initialize DB
   useEffect(() => {
-    fetch(`./musica.json?v=${new Date().getTime()}`)
-      .then(response => {
-        if (!response.ok) return [];
-        return response.json();
-      })
-      .then((data: Track[]) => {
-        if (Array.isArray(data) && data.length > 0) {
-            setTracks(data);
-        } else {
-            setTracks([]); 
+    // Usamos fetch simple. Si falla (404), asumimos base de datos nueva/vacía.
+    const loadDB = async () => {
+        try {
+            const response = await fetch(`./musica.json?v=${new Date().getTime()}`);
+            if (response.ok) {
+                const data = await response.json();
+                if (Array.isArray(data) && data.length > 0) {
+                    setTracks(data);
+                }
+            } else {
+                // Silenciosamente ignoramos el 404, es normal en primera carga
+                console.log("Iniciando con base de datos vacía.");
+            }
+        } catch (error) {
+            console.log("Base de datos local no disponible, iniciando limpio.");
         }
-      })
-      .catch(error => {
-        console.warn("Error loading musica.json", error);
-        setTracks([]); 
-      });
+    };
+    loadDB();
   }, []);
 
   const handleLogin = (mode: 'guest' | 'admin') => {
@@ -110,11 +112,10 @@ const App: React.FC = () => {
 
           incomingTracks.forEach(incoming => {
               // Match criteria: Title AND Folder (Album/Path) must match to overwrite.
-              // We normalize to lowercase for comparison.
               const index = merged.findIndex(existing => {
                   const titleMatch = existing.metadata.title.toLowerCase() === incoming.metadata.title.toLowerCase();
                   // Check album (folder name) or path
-                  const folderMatch = existing.metadata.album.toLowerCase() === incoming.metadata.album.toLowerCase() ||
+                  const folderMatch = (existing.metadata.album || "").toLowerCase() === (incoming.metadata.album || "").toLowerCase() ||
                                       existing.path.toLowerCase() === incoming.path.toLowerCase();
                   return titleMatch && folderMatch;
               });
@@ -123,9 +124,9 @@ const App: React.FC = () => {
                   // Overwrite existing
                   merged[index] = {
                       ...merged[index],
-                      // Merge metadata, preferring incoming
                       metadata: { ...merged[index].metadata, ...incoming.metadata },
-                      // Keep ID of existing to not break references, update others
+                      // If incoming has path, update it, otherwise keep existing
+                      path: incoming.path && incoming.path !== '/Importado/Txt' ? incoming.path : merged[index].path,
                       isVerified: true
                   };
                   updatedCount++;
@@ -157,7 +158,7 @@ const App: React.FC = () => {
               if (newTracks.length > 0) {
                   mergeTracks(newTracks);
               } else {
-                  alert("No se pudieron leer pistas del archivo TXT.");
+                  alert("No se pudieron leer pistas del archivo TXT. Verifique el formato.");
               }
           };
           reader.readAsText(file);
@@ -179,26 +180,29 @@ const App: React.FC = () => {
 
           const newTracks: Track[] = [];
           let startIndex = 0;
-          if (rows[0][0] && typeof rows[0][0] === 'string' && rows[0][0].toLowerCase().includes('nombre')) {
+          // Heuristic to skip header
+          if (rows[0][0] && typeof rows[0][0] === 'string' && (rows[0][0].toLowerCase().includes('nombre') || rows[0][0].toLowerCase().includes('titulo'))) {
               startIndex = 1;
           }
 
           for (let i = startIndex; i < rows.length; i++) {
               const row = rows[i];
-              if (!row[1]) continue;
+              // Basic validation: needs at least one field
+              if (!row[0] && !row[1] && !row[2]) continue;
 
               const folderName = String(row[0] || "Desconocido");
               const fullPath = String(row[1] || "").trim(); 
               const rawTitle = String(row[2] || "").trim(); 
 
               let filename = rawTitle;
+              // Try to guess filename from title or path
               if (!filename.match(/\.[0-9a-z]+$/i)) {
                    const pathParts = fullPath.split(/[\\/]/);
                    const lastPart = pathParts[pathParts.length - 1];
-                   if (lastPart.match(/\.[0-9a-z]+$/i)) {
+                   if (lastPart && lastPart.match(/\.[0-9a-z]+$/i)) {
                        filename = lastPart;
                    } else {
-                       filename = rawTitle + ".mp3"; 
+                       filename = (rawTitle || "Audio") + ".mp3"; 
                    }
               }
               const cleanTitle = rawTitle.replace(/\.[^/.]+$/, "") || filename.replace(/\.[^/.]+$/, "");
@@ -213,7 +217,7 @@ const App: React.FC = () => {
                       title: cleanTitle,
                       author: '', 
                       performer: '', 
-                      album: folderName, // "Nombre de carpeta" acts as Album/Group
+                      album: folderName, 
                       year: ''
                   }
               });
@@ -232,7 +236,7 @@ const App: React.FC = () => {
   };
 
   const handleImportCredits = async (file: File) => {
-      // Logic reused: just merge whatever comes in
+      // Reutilizamos la lógica, ya que mergeTracks sobrescribe si encuentra coincidencias
       handleImportFolders(file);
   };
 

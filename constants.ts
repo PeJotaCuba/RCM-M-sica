@@ -7,7 +7,10 @@ export const INITIAL_DB_CONTENT = ``;
 export const parseTxtDatabase = (txt: string): Track[] => {
   if (!txt || txt.trim() === '') return [];
 
-  const lines = txt.split('\n');
+  // Limpiar BOM (Byte Order Mark) si existe al principio del archivo para evitar errores en la primera línea
+  const cleanTxt = txt.replace(/^\uFEFF/, '');
+  
+  const lines = cleanTxt.split('\n');
   const tracks: Track[] = [];
   
   let currentTrack: Partial<Track> = { metadata: { title: '', author: '', performer: '', album: '', year: '' } };
@@ -15,10 +18,13 @@ export const parseTxtDatabase = (txt: string): Track[] => {
 
   lines.forEach((line, index) => {
     const trimmed = line.trim();
-    if (!trimmed) {
-        // Empty line usually separates blocks, save if we have data
-        if (hasData && currentTrack.metadata?.title) {
-            tracks.push(finalizeTrack(currentTrack, index));
+    
+    // Detectar separadores: líneas vacías o líneas de guiones
+    if (!trimmed || trimmed.startsWith('-----')) {
+        // Si tenemos datos acumulados, guardamos la pista
+        if (hasData && (currentTrack.metadata?.title || currentTrack.filename)) {
+            tracks.push(finalizeTrack(currentTrack, tracks.length));
+            // Reiniciar para la siguiente pista
             currentTrack = { metadata: { title: '', author: '', performer: '', album: '', year: '' } };
             hasData = false;
         }
@@ -26,36 +32,39 @@ export const parseTxtDatabase = (txt: string): Track[] => {
     }
 
     // Key: Value parsing
-    // Format 1 (General): Título, Compositor, Intérprete, Carpeta, Ruta
-    // Format 2 (Producciones): Título, Autor, País, Intérprete, País, Género
-    
-    if (trimmed.toLowerCase().startsWith('título:')) {
+    // Normalizamos a minúsculas para comparar keys
+    const lowerLine = trimmed.toLowerCase();
+
+    if (lowerLine.startsWith('título:')) {
         currentTrack.metadata!.title = trimmed.substring(7).trim();
         hasData = true;
-    } else if (trimmed.toLowerCase().startsWith('compositor:') || trimmed.toLowerCase().startsWith('autor:')) {
+    } else if (lowerLine.startsWith('compositor:') || lowerLine.startsWith('autor:')) {
         currentTrack.metadata!.author = trimmed.split(':')[1].trim();
-    } else if (trimmed.toLowerCase().startsWith('intérprete:')) {
+    } else if (lowerLine.startsWith('intérprete:')) {
         currentTrack.metadata!.performer = trimmed.split(':')[1].trim();
-    } else if (trimmed.toLowerCase().startsWith('carpeta:')) {
-        currentTrack.metadata!.album = trimmed.split(':')[1].trim(); // Map Carpeta to Album/Group
-    } else if (trimmed.toLowerCase().startsWith('ruta:')) {
+    } else if (lowerLine.startsWith('carpeta:')) {
+        currentTrack.metadata!.album = trimmed.split(':')[1].trim();
+    } else if (lowerLine.startsWith('ruta:')) {
         currentTrack.path = trimmed.split(':')[1].trim();
-    } else if (trimmed.toLowerCase().startsWith('país:') || trimmed.toLowerCase().startsWith('pais:')) {
-        // Heuristic: If author is filled but performer isn't, assign country to author. Else to performer.
-        // Or strictly follow order. Assuming standard block order.
+        // Intentar extraer nombre de archivo de la ruta si no hay título
+        if (!currentTrack.metadata?.title) {
+             const parts = currentTrack.path?.split(/[\\/]/);
+             if (parts) currentTrack.filename = parts[parts.length - 1];
+        }
+    } else if (lowerLine.startsWith('país:') || lowerLine.startsWith('pais:')) {
         if (currentTrack.metadata!.performer) {
             currentTrack.metadata!.performerCountry = trimmed.split(':')[1].trim();
         } else {
              currentTrack.metadata!.authorCountry = trimmed.split(':')[1].trim();
         }
-    } else if (trimmed.toLowerCase().startsWith('género:') || trimmed.toLowerCase().startsWith('genero:')) {
+    } else if (lowerLine.startsWith('género:') || lowerLine.startsWith('genero:')) {
         currentTrack.metadata!.genre = trimmed.split(':')[1].trim();
     }
   });
 
-  // Push last track if exists
-  if (hasData && currentTrack.metadata?.title) {
-      tracks.push(finalizeTrack(currentTrack, lines.length));
+  // Asegurar que la última pista se guarde si no termina con separador
+  if (hasData && (currentTrack.metadata?.title || currentTrack.filename)) {
+      tracks.push(finalizeTrack(currentTrack, tracks.length));
   }
 
   return tracks;
@@ -63,8 +72,17 @@ export const parseTxtDatabase = (txt: string): Track[] => {
 
 const finalizeTrack = (partial: Partial<Track>, index: number): Track => {
     const title = partial.metadata?.title || "Desconocido";
-    // If no path/filename provided, generate dummy ones based on title
-    const filename = partial.filename || `${title}.mp3`;
+    
+    // Generar nombre de archivo si no vino en la ruta
+    let filename = partial.filename;
+    if (!filename && partial.path) {
+        const parts = partial.path.split(/[\\/]/);
+        filename = parts[parts.length - 1];
+    }
+    if (!filename) {
+        filename = `${title}.mp3`;
+    }
+
     const path = partial.path || partial.metadata?.album || "/Importado/Txt";
 
     return {
@@ -72,7 +90,7 @@ const finalizeTrack = (partial: Partial<Track>, index: number): Track => {
         filename: filename,
         path: path,
         size: '---',
-        isVerified: true, // Manually imported via TXT usually implies verified info
+        isVerified: true, 
         metadata: {
             title: title,
             author: partial.metadata?.author || "",
