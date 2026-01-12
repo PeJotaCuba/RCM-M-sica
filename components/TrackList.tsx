@@ -9,13 +9,20 @@ interface TrackListProps {
 
 const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeFilter, setActiveFilter] = useState<FilterType>('folder'); // Default to folder based on user request "Load options of folders well"
+  const [activeFilter, setActiveFilter] = useState<FilterType>('folder'); 
+  const [currentFolder, setCurrentFolder] = useState<string | null>(null);
 
-  // Process data based on active filter
+  // Reset folder view when changing filter
+  const handleFilterChange = (filter: FilterType) => {
+      setActiveFilter(filter);
+      setCurrentFolder(null);
+      setSearchQuery('');
+  };
+
   const listItems = useMemo(() => {
     const query = searchQuery.toLowerCase();
     
-    // Filter source first by query (loose search across fields including PATH)
+    // Filter tracks by query (global filtering base)
     const matches = tracks.filter(t => 
        t.filename.toLowerCase().includes(query) ||
        t.path.toLowerCase().includes(query) ||
@@ -26,38 +33,45 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
     );
 
     if (activeFilter === 'folder') {
-        // Group by Album (which we mapped from "Nombre de Carpeta") or Path
-        // The prompt asks for "Nombre de las carpetas".
-        const uniqueFolders = new Map<string, Track[]>();
-        
-        matches.forEach(t => {
-            const folderName = t.metadata.album || "Sin Carpeta";
-            if (!uniqueFolders.has(folderName)) {
-                uniqueFolders.set(folderName, []);
-            }
-            uniqueFolders.get(folderName)!.push(t);
-        });
+        if (currentFolder) {
+            // Inside a folder: show tracks belonging to this folder matching query
+            return matches
+                .filter(t => (t.metadata.album || "Sin Carpeta") === currentFolder)
+                .map(t => ({
+                    id: t.id,
+                    mainText: t.metadata.title || t.filename,
+                    subText: t.metadata.performer || "Intérprete desconocido",
+                    type: 'track',
+                    payload: t,
+                    path: t.path
+                }));
+        } else {
+            // Folder List View: Show folders that contain matching tracks
+            const uniqueFolders = new Map<string, Track[]>();
+            matches.forEach(t => {
+                const folderName = t.metadata.album || "Sin Carpeta";
+                if (!uniqueFolders.has(folderName)) uniqueFolders.set(folderName, []);
+                uniqueFolders.get(folderName)!.push(t);
+            });
 
-        // Convert Map to display items
-        return Array.from(uniqueFolders.entries()).sort((a,b) => a[0].localeCompare(b[0])).map(([folderName, folderTracks]) => ({
-            id: `folder-${folderName}`,
-            mainText: folderName,
-            subText: `${folderTracks.length} temas`,
-            type: 'folder',
-            payload: folderTracks[0] // Just a reference, clicking might need to expand?
-            // Note: For simplicity in this architecture, clicking a folder could filter by that folder or just show the first track. 
-            // Better UX: Clicking folder switches filter to Title but filters by that folder? 
-            // For now, let's keep consistent: Click selects the reference track (first one) OR we need a sub-navigation.
-            // Requirement says "buscar temas por titulo o carpeta".
-        }));
-
+            return Array.from(uniqueFolders.entries())
+                .sort((a,b) => a[0].localeCompare(b[0]))
+                .map(([folderName, folderTracks]) => ({
+                    id: `folder-${folderName}`,
+                    mainText: folderName,
+                    subText: `${folderTracks.length} temas`,
+                    type: 'folder',
+                    payload: folderName
+                }));
+        }
     } else if (activeFilter === 'title') {
         return matches.map(t => ({
             id: t.id,
             mainText: t.metadata.title || t.filename,
             subText: t.metadata.performer || "Intérprete desconocido",
             type: 'track',
-            payload: t
+            payload: t,
+            path: t.path
         }));
     } else if (activeFilter === 'author') {
         const authors = Array.from(new Set(matches.map(t => t.metadata.author).filter(Boolean)));
@@ -79,14 +93,16 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
         }));
     }
     return [];
-  }, [tracks, searchQuery, activeFilter]);
+  }, [tracks, searchQuery, activeFilter, currentFolder]);
 
   const handleItemClick = (item: any) => {
       if (item.type === 'folder') {
-          // If clicking a folder, user likely wants to see tracks INSIDE that folder.
-          // Let's set the search query to the folder name and switch to Title view
-          setSearchQuery(item.mainText);
-          setActiveFilter('title');
+          setCurrentFolder(item.payload);
+          setSearchQuery(''); // Clear search to see all tracks in folder initially, or keep it? 
+          // User said: "deja buscar intacto". But if we dive in, search might result in 0 items if search was "Folder A".
+          // Usually drill down implies resetting context, but if query was "Love", we might want to see "Love" songs in "Folder A".
+          // Let's keep search query for continuity if it makes sense, but user feedback suggests they want simple navigation.
+          // Resetting search is safer for drill down.
       } else {
           onSelectTrack(item.payload);
       }
@@ -95,7 +111,7 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
   const copyToClipboard = (text: string, e: React.MouseEvent) => {
     e.stopPropagation();
     navigator.clipboard.writeText(text).then(() => {
-        console.log("Ruta copiada:", text);
+        alert("Ruta copiada al portapapeles");
     });
   };
 
@@ -106,45 +122,36 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
         <div className="flex flex-col gap-3">
           {/* Top Options Bar */}
           <div className="flex w-full bg-gray-100 dark:bg-gray-800 p-1 rounded-xl overflow-x-auto no-scrollbar">
-             <button 
-                onClick={() => setActiveFilter('folder')}
-                className={`flex-1 min-w-[70px] py-1.5 text-[10px] sm:text-xs font-bold rounded-lg transition-all ${activeFilter === 'folder' ? 'bg-white dark:bg-gray-700 text-primary shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}
-             >
-                Carpetas
-             </button>
-             <button 
-                onClick={() => setActiveFilter('title')}
-                className={`flex-1 min-w-[70px] py-1.5 text-[10px] sm:text-xs font-bold rounded-lg transition-all ${activeFilter === 'title' ? 'bg-white dark:bg-gray-700 text-primary shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}
-             >
-                Títulos
-             </button>
-             <button 
-                onClick={() => setActiveFilter('author')}
-                className={`flex-1 min-w-[70px] py-1.5 text-[10px] sm:text-xs font-bold rounded-lg transition-all ${activeFilter === 'author' ? 'bg-white dark:bg-gray-700 text-primary shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}
-             >
-                Autores
-             </button>
-             <button 
-                onClick={() => setActiveFilter('performer')}
-                className={`flex-1 min-w-[70px] py-1.5 text-[10px] sm:text-xs font-bold rounded-lg transition-all ${activeFilter === 'performer' ? 'bg-white dark:bg-gray-700 text-primary shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}
-             >
-                Intérpretes
-             </button>
+             <button onClick={() => handleFilterChange('folder')} className={`flex-1 min-w-[70px] py-1.5 text-[10px] sm:text-xs font-bold rounded-lg transition-all ${activeFilter === 'folder' ? 'bg-white dark:bg-gray-700 text-primary shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}>Carpetas</button>
+             <button onClick={() => handleFilterChange('title')} className={`flex-1 min-w-[70px] py-1.5 text-[10px] sm:text-xs font-bold rounded-lg transition-all ${activeFilter === 'title' ? 'bg-white dark:bg-gray-700 text-primary shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}>Títulos</button>
+             <button onClick={() => handleFilterChange('author')} className={`flex-1 min-w-[70px] py-1.5 text-[10px] sm:text-xs font-bold rounded-lg transition-all ${activeFilter === 'author' ? 'bg-white dark:bg-gray-700 text-primary shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}>Autores</button>
+             <button onClick={() => handleFilterChange('performer')} className={`flex-1 min-w-[70px] py-1.5 text-[10px] sm:text-xs font-bold rounded-lg transition-all ${activeFilter === 'performer' ? 'bg-white dark:bg-gray-700 text-primary shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}>Intérpretes</button>
           </div>
 
-          <label className="flex flex-col w-full relative">
-            <div className="flex w-full items-stretch rounded-xl h-12 overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 transition-all focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/30">
-              <div className="text-gray-400 flex items-center justify-center pl-4">
-                <span className="material-symbols-outlined">search</span>
-              </div>
-              <input 
-                className="flex w-full border-none bg-transparent text-gray-900 dark:text-white focus:ring-0 placeholder:text-gray-400 px-3 text-base font-normal leading-normal" 
-                placeholder="Buscar..." 
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-            </div>
-          </label>
+          <div className="flex gap-2 items-center">
+            {activeFilter === 'folder' && currentFolder && (
+                <button 
+                    onClick={() => setCurrentFolder(null)}
+                    className="size-12 flex items-center justify-center bg-gray-100 dark:bg-gray-800 rounded-xl text-primary hover:bg-gray-200"
+                >
+                    <span className="material-symbols-outlined">arrow_back</span>
+                </button>
+            )}
+            
+            <label className="flex-1 flex flex-col relative">
+                <div className="flex w-full items-stretch rounded-xl h-12 overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 transition-all focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/30">
+                <div className="text-gray-400 flex items-center justify-center pl-4">
+                    <span className="material-symbols-outlined">search</span>
+                </div>
+                <input 
+                    className="flex w-full border-none bg-transparent text-gray-900 dark:text-white focus:ring-0 placeholder:text-gray-400 px-3 text-base font-normal leading-normal" 
+                    placeholder={currentFolder ? `Buscar en ${currentFolder}...` : "Buscar..."}
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                />
+                </div>
+            </label>
+          </div>
         </div>
       </div>
 
@@ -162,9 +169,9 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
               onClick={() => handleItemClick(item)}
               className="group flex items-center gap-4 bg-white dark:bg-background-dark px-4 py-4 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer active:scale-[0.99]"
             >
-              <div className={`flex items-center justify-center rounded-xl shrink-0 size-12 border ${activeFilter === 'title' ? 'bg-primary/10 border-primary/20 text-primary' : (activeFilter === 'folder' ? 'bg-miel/10 border-miel/20 text-miel' : 'bg-gray-100 border-gray-200 text-gray-600')}`}>
+              <div className={`flex items-center justify-center rounded-xl shrink-0 size-12 border ${activeFilter === 'title' || (activeFilter === 'folder' && currentFolder) ? 'bg-primary/10 border-primary/20 text-primary' : (activeFilter === 'folder' ? 'bg-miel/10 border-miel/20 text-miel' : 'bg-gray-100 border-gray-200 text-gray-600')}`}>
                 <span className="material-symbols-outlined">
-                    {activeFilter === 'title' ? 'music_note' : (activeFilter === 'folder' ? 'folder' : (activeFilter === 'author' ? 'person_edit' : 'mic_external_on'))}
+                    {activeFilter === 'title' || (activeFilter === 'folder' && currentFolder) ? 'music_note' : (activeFilter === 'folder' ? 'folder' : (activeFilter === 'author' ? 'person_edit' : 'mic_external_on'))}
                 </span>
               </div>
               <div className="flex flex-col flex-1 min-w-0">
@@ -177,8 +184,19 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
               </div>
               
               <div className="shrink-0 flex items-center gap-2">
+                 {/* Copy Path Button - restored */}
+                 {item.type === 'track' && item.path && (
+                     <button 
+                        onClick={(e) => copyToClipboard(item.path, e)}
+                        className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 hover:text-azul-cauto transition-colors"
+                        title="Copiar ruta"
+                     >
+                        <span className="material-symbols-outlined text-lg">content_copy</span>
+                     </button>
+                 )}
+                 
                  <span className="material-symbols-outlined text-gray-300 dark:text-gray-600">
-                     {activeFilter === 'folder' ? 'chevron_right' : 'visibility'}
+                     {activeFilter === 'folder' && !currentFolder ? 'chevron_right' : 'visibility'}
                  </span>
               </div>
             </div>

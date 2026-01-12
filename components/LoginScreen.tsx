@@ -8,6 +8,7 @@ interface LoginScreenProps {
 const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   const [showAdminInput, setShowAdminInput] = useState(false);
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [logoError, setLogoError] = useState(false);
 
@@ -19,9 +20,13 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     }
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter') {
+          handleAdminLogin();
+      }
+  };
+
   const handleUpdate = () => {
-    // Abre el enlace del repositorio o de la release más reciente
-    // Utilizar _blank con noopener para compatibilidad segura en Chrome
     window.open("https://github.com/google/gemini-api-cookbook", "_blank", "noopener,noreferrer");
   };
 
@@ -32,7 +37,6 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
        <div className="flex-1 flex flex-col items-center justify-center p-6 z-10 w-full overflow-y-auto">
           <div className="w-full max-w-xs flex flex-col items-center space-y-8 my-auto">
              <div className="text-center">
-                {/* Contenedor del Logo con Fallback */}
                 <div className="w-48 h-48 mx-auto mb-4 relative flex items-center justify-center">
                    {!logoError ? (
                        <img 
@@ -73,16 +77,28 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                ) : (
                    <div className="bg-white dark:bg-zinc-800 p-6 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 animate-fade-in">
                        <h3 className="text-center font-bold text-gray-900 dark:text-white mb-4">Acceso Administrativo</h3>
-                       <input 
-                           type="password" 
-                           placeholder="Contraseña"
-                           className="w-full mb-4 px-4 py-3 rounded-lg bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-gray-700 focus:border-primary focus:ring-1 focus:ring-primary outline-none"
-                           value={password}
-                           onChange={(e) => {
-                               setPassword(e.target.value);
-                               setError('');
-                           }}
-                       />
+                       <div className="relative mb-4">
+                           <input 
+                               type={showPassword ? "text" : "password"}
+                               placeholder="Contraseña"
+                               className="w-full px-4 py-3 rounded-lg bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-gray-700 focus:border-primary focus:ring-1 focus:ring-primary outline-none"
+                               value={password}
+                               onChange={(e) => {
+                                   setPassword(e.target.value);
+                                   setError('');
+                               }}
+                               onKeyDown={handleKeyDown}
+                           />
+                           <button 
+                                onClick={() => setShowPassword(!showPassword)}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                           >
+                               <span className="material-symbols-outlined text-lg">
+                                   {showPassword ? 'visibility_off' : 'visibility'}
+                               </span>
+                           </button>
+                       </div>
+                       
                        {error && <p className="text-red-500 text-xs mb-4 text-center">{error}</p>}
                        <div className="flex gap-2">
                            <button 

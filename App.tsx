@@ -11,6 +11,8 @@ import Productions from './components/Productions';
 import { fetchCreditsFromGemini } from './services/geminiService';
 import * as XLSX from 'xlsx';
 
+const DB_KEY = 'rcm_db_tracks';
+
 const App: React.FC = () => {
   const [tracks, setTracks] = useState<Track[]>([]);
   const [view, setView] = useState<ViewState>(ViewState.LOGIN);
@@ -24,19 +26,48 @@ const App: React.FC = () => {
   const [foundCredits, setFoundCredits] = useState<CreditInfo | null>(null);
   const [isSearching, setIsSearching] = useState(false);
 
+  // Helper to save to local storage
+  const updateTracks = (newTracks: Track[] | ((prev: Track[]) => Track[])) => {
+      setTracks(prev => {
+          const updated = typeof newTracks === 'function' ? newTracks(prev) : newTracks;
+          try {
+              localStorage.setItem(DB_KEY, JSON.stringify(updated));
+          } catch (e) {
+              console.error("Error saving to local storage", e);
+          }
+          return updated;
+      });
+  };
+
   // Initialize DB
   useEffect(() => {
-    // Usamos fetch simple. Si falla (404), asumimos base de datos nueva/vacía.
     const loadDB = async () => {
+        // 1. Try Local Storage first
+        const localData = localStorage.getItem(DB_KEY);
+        if (localData) {
+            try {
+                const parsed = JSON.parse(localData);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    setTracks(parsed);
+                    console.log("Cargado desde Local Storage");
+                    return; // Stop if local data exists
+                }
+            } catch (e) {
+                console.warn("Datos locales corruptos");
+            }
+        }
+
+        // 2. Fallback to json file if no local data
         try {
             const response = await fetch(`./musica.json?v=${new Date().getTime()}`);
             if (response.ok) {
                 const data = await response.json();
                 if (Array.isArray(data) && data.length > 0) {
                     setTracks(data);
+                    // Save to local for next time
+                    localStorage.setItem(DB_KEY, JSON.stringify(data));
                 }
             } else {
-                // Silenciosamente ignoramos el 404, es normal en primera carga
                 console.log("Iniciando con base de datos vacía.");
             }
         } catch (error) {
@@ -84,9 +115,7 @@ const App: React.FC = () => {
 
   const handleApplyCredits = (newCredits: CreditInfo) => {
     if (!selectedTrack) return;
-    // Update main list
-    setTracks(prev => prev.map(t => t.id === selectedTrack.id ? { ...t, isVerified: true, metadata: newCredits } : t));
-    // Update selected track locally to reflect changes immediately in Modal if it stays open (though we close it usually)
+    updateTracks(prev => prev.map(t => t.id === selectedTrack.id ? { ...t, isVerified: true, metadata: newCredits } : t));
     setSelectedTrack(prev => prev ? { ...prev, isVerified: true, metadata: newCredits } : null);
     
     setView(ViewState.LIST);
@@ -94,7 +123,7 @@ const App: React.FC = () => {
   };
   
   const handleManualEdit = (updatedTrack: Track) => {
-      setTracks(prev => prev.map(t => t.id === updatedTrack.id ? updatedTrack : t));
+      updateTracks(prev => prev.map(t => t.id === updatedTrack.id ? updatedTrack : t));
       setSelectedTrack(updatedTrack);
   };
 
@@ -105,33 +134,28 @@ const App: React.FC = () => {
 
   // --- Merge Logic ---
   const mergeTracks = (incomingTracks: Track[]) => {
-      setTracks(currentTracks => {
+      updateTracks(currentTracks => {
           const merged = [...currentTracks];
           let updatedCount = 0;
           let addedCount = 0;
 
           incomingTracks.forEach(incoming => {
-              // Match criteria: Title AND Folder (Album/Path) must match to overwrite.
               const index = merged.findIndex(existing => {
                   const titleMatch = existing.metadata.title.toLowerCase() === incoming.metadata.title.toLowerCase();
-                  // Check album (folder name) or path
                   const folderMatch = (existing.metadata.album || "").toLowerCase() === (incoming.metadata.album || "").toLowerCase() ||
                                       existing.path.toLowerCase() === incoming.path.toLowerCase();
                   return titleMatch && folderMatch;
               });
 
               if (index >= 0) {
-                  // Overwrite existing
                   merged[index] = {
                       ...merged[index],
                       metadata: { ...merged[index].metadata, ...incoming.metadata },
-                      // If incoming has path, update it, otherwise keep existing
                       path: incoming.path && incoming.path !== '/Importado/Txt' ? incoming.path : merged[index].path,
                       isVerified: true
                   };
                   updatedCount++;
               } else {
-                  // Add new
                   merged.push(incoming);
                   addedCount++;
               }
@@ -142,30 +166,22 @@ const App: React.FC = () => {
       });
   };
 
-  // --- Import Handlers ---
-
   const handleImportFolders = async (file: File) => {
       if (!file) return;
-      
       const fileName = file.name.toLowerCase();
       
-      // TXT Handler
       if (fileName.endsWith('.txt')) {
           const reader = new FileReader();
           reader.onload = (e) => {
               const text = e.target?.result as string;
               const newTracks = parseTxtDatabase(text);
-              if (newTracks.length > 0) {
-                  mergeTracks(newTracks);
-              } else {
-                  alert("No se pudieron leer pistas del archivo TXT. Verifique el formato.");
-              }
+              if (newTracks.length > 0) mergeTracks(newTracks);
+              else alert("No se pudieron leer pistas del archivo TXT. Verifique el formato.");
           };
           reader.readAsText(file);
           return;
       }
 
-      // XLSX Handler
       try {
           const data = await file.arrayBuffer();
           const workbook = XLSX.read(data);
@@ -180,14 +196,12 @@ const App: React.FC = () => {
 
           const newTracks: Track[] = [];
           let startIndex = 0;
-          // Heuristic to skip header
           if (rows[0][0] && typeof rows[0][0] === 'string' && (rows[0][0].toLowerCase().includes('nombre') || rows[0][0].toLowerCase().includes('titulo'))) {
               startIndex = 1;
           }
 
           for (let i = startIndex; i < rows.length; i++) {
               const row = rows[i];
-              // Basic validation: needs at least one field
               if (!row[0] && !row[1] && !row[2]) continue;
 
               const folderName = String(row[0] || "Desconocido");
@@ -195,15 +209,11 @@ const App: React.FC = () => {
               const rawTitle = String(row[2] || "").trim(); 
 
               let filename = rawTitle;
-              // Try to guess filename from title or path
               if (!filename.match(/\.[0-9a-z]+$/i)) {
                    const pathParts = fullPath.split(/[\\/]/);
                    const lastPart = pathParts[pathParts.length - 1];
-                   if (lastPart && lastPart.match(/\.[0-9a-z]+$/i)) {
-                       filename = lastPart;
-                   } else {
-                       filename = (rawTitle || "Audio") + ".mp3"; 
-                   }
+                   if (lastPart && lastPart.match(/\.[0-9a-z]+$/i)) filename = lastPart;
+                   else filename = (rawTitle || "Audio") + ".mp3"; 
               }
               const cleanTitle = rawTitle.replace(/\.[^/.]+$/, "") || filename.replace(/\.[^/.]+$/, "");
 
@@ -223,11 +233,8 @@ const App: React.FC = () => {
               });
           }
 
-          if (newTracks.length > 0) {
-               mergeTracks(newTracks);
-          } else {
-              alert("No se pudieron interpretar las filas del Excel.");
-          }
+          if (newTracks.length > 0) mergeTracks(newTracks);
+          else alert("No se pudieron interpretar las filas del Excel.");
 
       } catch (error) {
           console.error("Error importando excel:", error);
@@ -236,7 +243,6 @@ const App: React.FC = () => {
   };
 
   const handleImportCredits = async (file: File) => {
-      // Reutilizamos la lógica, ya que mergeTracks sobrescribe si encuentra coincidencias
       handleImportFolders(file);
   };
 
@@ -250,8 +256,6 @@ const App: React.FC = () => {
 
   return (
     <div className="max-w-md mx-auto h-screen bg-gray-100 shadow-2xl overflow-hidden relative border-x border-gray-200 flex flex-col">
-        
-        {/* Header */}
         {view !== ViewState.RESULTS && (
              <header className="bg-azul-header text-white px-4 py-4 flex items-center justify-between shadow-md relative z-20 shrink-0">
                 <div className="flex items-center gap-3">
@@ -266,7 +270,6 @@ const App: React.FC = () => {
             </header>
         )}
 
-        {/* Main Content Area */}
         <div className="flex-1 overflow-hidden relative">
             {view === ViewState.LIST && (
                 <TrackList tracks={tracks} onSelectTrack={handleSelectTrack} />
@@ -293,10 +296,12 @@ const App: React.FC = () => {
             )}
 
             {view === ViewState.PRODUCTIONS && (
-                <Productions onAddTracks={handleAddProductionTracks} />
+                <Productions 
+                    onAddTracks={handleAddProductionTracks} 
+                    allTracks={tracks} // Pass all tracks for reporting
+                />
             )}
 
-            {/* Results View (Full Screen) */}
             {view === ViewState.RESULTS && selectedTrack && (
                 <CreditResults 
                     originalTrack={selectedTrack}
@@ -308,7 +313,6 @@ const App: React.FC = () => {
             )}
         </div>
 
-        {/* Detail Modal Overlay */}
         {(view === ViewState.LIST || view === ViewState.RECENT) && selectedTrack && (
             <TrackDetail 
                 track={selectedTrack} 
@@ -319,7 +323,6 @@ const App: React.FC = () => {
             />
         )}
         
-        {/* Bottom Navigation */}
         {view !== ViewState.RESULTS && (
             <nav className="bg-white dark:bg-background-dark border-t border-gray-200 dark:border-gray-800 h-20 px-2 flex items-center justify-between pb-2 z-20 shrink-0">
                 <button 
