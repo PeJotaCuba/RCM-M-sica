@@ -11,7 +11,7 @@ import Productions from './components/Productions';
 import { fetchCreditsFromGemini } from './services/geminiService';
 import * as XLSX from 'xlsx';
 
-const DB_KEY = 'rcm_db_tracks';
+const DB_KEY = 'rcm_db_datosm';
 const AUTH_KEY = 'rcm_auth_session';
 
 const App: React.FC = () => {
@@ -40,12 +40,12 @@ const App: React.FC = () => {
       });
   };
 
-  // Function to fetch from GitHub with fallback URLs
+  // Function to fetch from GitHub with fallback URLs (using datosm.json)
   const fetchFromGithub = async () => {
       const urls = [
-          `https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/musica.json?t=${Date.now()}`,
-          `https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/main/musica.json?t=${Date.now()}`,
-          `https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/master/musica.json?t=${Date.now()}`
+          `https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/datosm.json?t=${Date.now()}`,
+          `https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/main/datosm.json?t=${Date.now()}`,
+          `https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/master/datosm.json?t=${Date.now()}`
       ];
 
       for (const url of urls) {
@@ -138,7 +138,7 @@ const App: React.FC = () => {
                    mergeTracks(remoteData, true);
                    alert(`Base de datos actualizada con éxito.\nSe encontraron ${remoteData.length} registros en GitHub.`);
               } else {
-                  alert("Conexión exitosa con GitHub, pero el archivo 'musica.json' está vacío ([]).");
+                  alert("Conexión exitosa con GitHub, pero el archivo 'datosm.json' está vacío ([]).");
               }
           } else {
               throw new Error("El formato del archivo en GitHub no es una lista válida.");
@@ -336,27 +336,28 @@ const App: React.FC = () => {
                         {view === ViewState.SETTINGS ? 'Ajustes' : (view === ViewState.RECENT ? 'Recientes' : (view === ViewState.PRODUCTIONS ? 'Producciones' : 'RCM Música'))}
                     </h1>
                 </div>
-                {authMode === 'admin' && (
-                    <div className="flex items-center gap-4">
-                        <div className="bg-miel text-white text-[10px] font-bold px-2 py-0.5 rounded shadow-sm">ADMIN</div>
-                        <div className="flex items-center gap-3">
-                            <button 
-                                onClick={handleUpdateDatabase}
-                                className="text-white bg-white/10 hover:bg-white/20 p-2 rounded-full transition-colors flex items-center justify-center size-10"
-                                title="Actualizar App y Base de Datos"
-                            >
-                                <span className="material-symbols-outlined text-xl">cloud_sync</span>
-                            </button>
-                            <button 
-                                onClick={handleLogout}
-                                className="text-white bg-white/10 hover:bg-red-500/50 p-2 rounded-full transition-colors flex items-center justify-center size-10"
-                                title="Cerrar Sesión"
-                            >
-                                <span className="material-symbols-outlined text-xl">logout</span>
-                            </button>
-                        </div>
+                {/* Auth Controls for Both Admin and Guest */}
+                <div className="flex items-center gap-4">
+                    <div className={`text-[10px] font-bold px-2 py-0.5 rounded shadow-sm ${authMode === 'admin' ? 'bg-miel text-white' : 'bg-green-600 text-white'}`}>
+                        {authMode === 'admin' ? 'ADMIN' : 'USUARIO'}
                     </div>
-                )}
+                    <div className="flex items-center gap-3">
+                        <button 
+                            onClick={handleUpdateDatabase}
+                            className="text-white bg-white/10 hover:bg-white/20 p-2 rounded-full transition-colors flex items-center justify-center size-10"
+                            title="Actualizar App y Base de Datos"
+                        >
+                            <span className="material-symbols-outlined text-xl">cloud_sync</span>
+                        </button>
+                        <button 
+                            onClick={handleLogout}
+                            className="text-white bg-white/10 hover:bg-red-500/50 p-2 rounded-full transition-colors flex items-center justify-center size-10"
+                            title="Cerrar Sesión"
+                        >
+                            <span className="material-symbols-outlined text-xl">logout</span>
+                        </button>
+                    </div>
+                </div>
             </header>
         )}
 
@@ -385,7 +386,7 @@ const App: React.FC = () => {
                 />
             )}
 
-            {view === ViewState.PRODUCTIONS && (
+            {view === ViewState.PRODUCTIONS && authMode === 'admin' && (
                 <Productions 
                     onAddTracks={handleAddProductionTracks} 
                     allTracks={tracks} 
@@ -431,13 +432,15 @@ const App: React.FC = () => {
                     <span className="text-[9px] sm:text-[10px] font-bold">Recientes</span>
                 </button>
 
-                <button 
-                    onClick={() => setView(ViewState.PRODUCTIONS)}
-                    className={`flex flex-col items-center gap-1 transition-colors px-2 ${view === ViewState.PRODUCTIONS ? 'text-primary' : 'text-gray-400 hover:text-azul-cauto'}`}
-                >
-                    <span className={`material-symbols-outlined ${view === ViewState.PRODUCTIONS ? 'material-symbols-filled' : ''}`}>playlist_add</span>
-                    <span className="text-[9px] sm:text-[10px] font-bold">Producciones</span>
-                </button>
+                {authMode === 'admin' && (
+                    <button 
+                        onClick={() => setView(ViewState.PRODUCTIONS)}
+                        className={`flex flex-col items-center gap-1 transition-colors px-2 ${view === ViewState.PRODUCTIONS ? 'text-primary' : 'text-gray-400 hover:text-azul-cauto'}`}
+                    >
+                        <span className={`material-symbols-outlined ${view === ViewState.PRODUCTIONS ? 'material-symbols-filled' : ''}`}>playlist_add</span>
+                        <span className="text-[9px] sm:text-[10px] font-bold">Producciones</span>
+                    </button>
+                )}
 
                 {authMode === 'admin' && (
                     <button 

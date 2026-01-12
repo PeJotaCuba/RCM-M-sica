@@ -15,7 +15,7 @@ const Settings: React.FC<SettingsProps> = ({ tracks, onImportFolders, onImportCr
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(tracks, null, 2));
     const downloadAnchorNode = document.createElement('a');
     downloadAnchorNode.setAttribute("href", dataStr);
-    downloadAnchorNode.setAttribute("download", "musica.json");
+    downloadAnchorNode.setAttribute("download", "datosm.json");
     document.body.appendChild(downloadAnchorNode);
     downloadAnchorNode.click();
     downloadAnchorNode.remove();
@@ -80,7 +80,7 @@ const Settings: React.FC<SettingsProps> = ({ tracks, onImportFolders, onImportCr
                     className="w-full py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold shadow-md flex items-center justify-center gap-2"
                 >
                     <span className="material-symbols-outlined">download</span>
-                    Descargar musica.json
+                    Descargar datosm.json
                 </button>
             </div>
         </div>
