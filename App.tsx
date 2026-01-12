@@ -59,8 +59,8 @@ const App: React.FC = () => {
 
         // 2. Fallback to json file if no local data (Try GitHub as fallback if local is empty)
         try {
-            // Using GitHub raw link for initialization as well just in case
-            const response = await fetch(`https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/main/musica.json?v=${new Date().getTime()}`);
+            // Using GitHub raw link provided by user
+            const response = await fetch(`https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/musica.json?v=${new Date().getTime()}`);
             if (response.ok) {
                 const data = await response.json();
                 if (Array.isArray(data) && data.length > 0) {
@@ -95,12 +95,12 @@ const App: React.FC = () => {
       if (!confirmUpdate) return;
 
       try {
-          // Fetch from GitHub RAW url
-          const response = await fetch(`https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/main/musica.json?t=${Date.now()}`);
+          // Fetch from GitHub RAW url provided by user
+          const response = await fetch(`https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/musica.json?t=${Date.now()}`);
           
           if (response.status === 404) {
               console.warn("Archivo musica.json no encontrado en GitHub.");
-              alert("No se encontró el archivo 'musica.json' en la ruta especificada de GitHub (404).\n\nVerifique que el archivo exista en el repositorio 'RCM-M-sica/main'.");
+              alert("No se encontró el archivo 'musica.json' en la ruta especificada de GitHub (404).\n\nVerifique que el archivo exista en el repositorio.");
           } else if (response.ok) {
               const remoteData = await response.json();
               if (Array.isArray(remoteData) && remoteData.length > 0) {
@@ -114,7 +114,7 @@ const App: React.FC = () => {
           }
       } catch (error) {
           console.error("Update failed", error);
-          alert("Aviso: No se pudo conectar con GitHub (puede ser un problema de red o CORS).\n\nSe recargará la aplicación para intentar actualizar el sistema.");
+          alert("Aviso: No se pudo conectar con GitHub (Error de red o CORS).\n\nSe recargará la aplicación para intentar actualizar el sistema.");
       } finally {
           // ALWAYS Reload to update App Version (Code)
           window.location.reload();
