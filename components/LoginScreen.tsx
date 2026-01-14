@@ -5,9 +5,11 @@ import { User } from '../types';
 interface LoginScreenProps {
   onLoginSuccess: (user: User) => void;
   users: User[];
+  onUpdate: () => void;
+  isUpdating: boolean;
 }
 
-const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, users }) => {
+const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, users, onUpdate, isUpdating }) => {
   const [identifier, setIdentifier] = useState(''); // Can be username or phone
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -109,6 +111,21 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, users }) => {
                  >
                      <span>Iniciar Sesión</span>
                      <span className="material-symbols-outlined">arrow_forward</span>
+                 </button>
+
+                 <div className="relative flex py-2 items-center">
+                    <div className="flex-grow border-t border-gray-200 dark:border-gray-700"></div>
+                    <span className="flex-shrink-0 mx-4 text-gray-400 text-[10px] uppercase">Opciones de Datos</span>
+                    <div className="flex-grow border-t border-gray-200 dark:border-gray-700"></div>
+                 </div>
+
+                 <button 
+                     onClick={onUpdate}
+                     disabled={isUpdating}
+                     className="w-full bg-white dark:bg-white/5 hover:bg-gray-50 dark:hover:bg-white/10 text-azul-cauto dark:text-blue-300 font-bold py-3 rounded-xl border border-gray-200 dark:border-white/10 flex items-center justify-center gap-2 transition-all text-sm"
+                 >
+                     <span className={`material-symbols-outlined ${isUpdating ? 'animate-spin' : ''}`}>cloud_download</span>
+                     <span>{isUpdating ? 'Descargando...' : 'Actualizar Base de Datos (Nube)'}</span>
                  </button>
              </div>
           </div>

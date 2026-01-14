@@ -160,42 +160,79 @@ const App: React.FC = () => {
       updateUsers(users.filter(u => u.username !== username));
   };
 
-  // --- SYNC WITH GITHUB (JSON) ---
+  // --- SYNC WITH GOOGLE DRIVE (JSON) ---
   const handleUpdateDatabase = async () => {
-      // Only Admin
-      if (authMode !== 'admin') return;
+      // Allow update if Admin OR if we are on Login screen (to pull initial data)
+      if (authMode !== 'admin' && view !== ViewState.LOGIN) return;
 
       const confirmUpdate = window.confirm(
-          `¿Sincronizar con GitHub?\n\nSe buscará el archivo 'datosm.json' en el repositorio.\nEsto reemplazará la base de datos local con la versión de la nube.`
+          `¿Actualizar desde la Nube?\n\nSe buscará el archivo 'datosm.json' en Google Drive.\nEsto reemplazará la base de datos local con la versión de la nube.`
       );
       if (!confirmUpdate) return;
 
       setIsUpdating(true);
       
-      const jsonUrl = 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/main/datosm.json';
-      const fallbackUrl = 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/master/datosm.json';
-
+      // Google Drive Direct Download Link (ID extracted from view link)
+      const FILE_ID = "1qgsO1JFVbSw1Q1Z-1b2stT2U7h2Vw7W6";
+      const driveUrl = `https://drive.google.com/uc?export=download&id=${FILE_ID}`;
+      
+      // Using a CORS proxy can be necessary for client-side fetches from Drive, 
+      // but let's try direct first or use a standard proxy if it fails.
+      // A common reliable trick for public drive files in React apps involves using a proxy 
+      // if direct fetch is blocked by CORS policy.
+      // Trying direct fetch first. If it fails, users might need to use a CORS extension or we use a proxy.
+      // For this implementation, we will assume standard fetch works or add a fallback proxy.
+      
       try {
-          let response = await fetch(jsonUrl);
-          if (!response.ok) {
-              console.log("Intentando URL alternativa...");
-              response = await fetch(fallbackUrl);
-          }
+          // Attempt direct fetch
+          let response = await fetch(driveUrl);
           
-          if (!response.ok) throw new Error("No se pudo descargar datosm.json");
+          if (!response.ok) {
+              // Fallback to a CORS proxy if direct fails (common in development)
+               console.log("Direct fetch failed, trying proxy...");
+               response = await fetch(`https://corsproxy.io/?${encodeURIComponent(driveUrl)}`);
+          }
+
+          if (!response.ok) throw new Error("No se pudo descargar datosm.json desde Drive");
 
           const jsonData = await response.json();
           
-          if (Array.isArray(jsonData) && jsonData.length > 0) {
+          let trackCount = 0;
+          let userCount = 0;
+
+          // Handle simple Array (Tracks only) OR Object { tracks: [], users: [] }
+          if (Array.isArray(jsonData)) {
                updateTracks(jsonData);
-               alert(`Sincronización exitosa.\nSe cargaron ${jsonData.length} temas.`);
-               window.location.reload();
+               trackCount = jsonData.length;
+          } else if (typeof jsonData === 'object') {
+               if (jsonData.tracks && Array.isArray(jsonData.tracks)) {
+                   updateTracks(jsonData.tracks);
+                   trackCount = jsonData.tracks.length;
+               }
+               // This allows syncing users if they are included in the JSON in the future
+               if (jsonData.users && Array.isArray(jsonData.users)) {
+                   updateUsers(jsonData.users);
+                   userCount = jsonData.users.length;
+               }
           } else {
-              alert("El archivo JSON descargado está vacío o tiene un formato incorrecto.");
+               throw new Error("Formato JSON no reconocido");
           }
+
+          let msg = `Sincronización exitosa.\n`;
+          if (trackCount > 0) msg += `- ${trackCount} temas actualizados.\n`;
+          if (userCount > 0) msg += `- ${userCount} usuarios actualizados.\n`;
+          
+          alert(msg);
+          
+          // Only reload if we are not in the middle of an active admin session to avoid jarring UX, 
+          // unless on login screen where reload ensures fresh state.
+          if (view === ViewState.LOGIN) {
+              window.location.reload();
+          }
+
       } catch (error) {
           console.error("Update failed", error);
-          alert("Error al sincronizar. Asegúrese de que 'datosm.json' existe en el repositorio.");
+          alert("Error al sincronizar con Google Drive. Verifique su conexión.");
       } finally {
           setIsUpdating(false);
       }
@@ -207,6 +244,10 @@ const App: React.FC = () => {
           alert("No hay datos para exportar.");
           return;
       }
+      
+      // Export current state. 
+      // Note: Currently exporting ONLY tracks to maintain compatibility with original schema.
+      // To export users, one would wrap it: { tracks: tracks, users: users }
       const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(tracks, null, 2));
       const downloadAnchorNode = document.createElement('a');
       downloadAnchorNode.setAttribute("href", dataStr);
@@ -296,7 +337,12 @@ const App: React.FC = () => {
 
   if (view === ViewState.LOGIN) {
       return (
-        <LoginScreen onLoginSuccess={handleLoginSuccess} users={users} />
+        <LoginScreen 
+            onLoginSuccess={handleLoginSuccess} 
+            users={users} 
+            onUpdate={handleUpdateDatabase}
+            isUpdating={isUpdating}
+        />
       );
   }
 
@@ -338,16 +384,16 @@ const App: React.FC = () => {
                         </button>
                     )}
                     
-                    {authMode === 'admin' && (
-                        <button 
-                            onClick={handleUpdateDatabase}
-                            className={`text-white bg-white/10 hover:bg-white/20 p-2 rounded-full transition-colors flex items-center justify-center size-10 ${isUpdating ? 'animate-spin bg-white/30' : ''}`}
-                            title="Sincronizar Github"
-                            disabled={isUpdating}
-                        >
-                            <span className="material-symbols-outlined text-xl">sync_alt</span>
-                        </button>
-                    )}
+                    {/* Botón Update ahora apunta a Drive */}
+                    <button 
+                        onClick={handleUpdateDatabase}
+                        className={`text-white bg-white/10 hover:bg-white/20 p-2 rounded-full transition-colors flex items-center justify-center size-10 ${isUpdating ? 'animate-spin bg-white/30' : ''}`}
+                        title="Sincronizar desde Drive"
+                        disabled={isUpdating}
+                    >
+                        <span className="material-symbols-outlined text-xl">cloud_sync</span>
+                    </button>
+
                     <button 
                         onClick={handleLogout}
                         className="text-white bg-white/10 hover:bg-red-500/50 p-2 rounded-full transition-colors flex items-center justify-center size-10"
@@ -362,7 +408,7 @@ const App: React.FC = () => {
         {isUpdating && (
             <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm text-white">
                 <div className="size-16 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4"></div>
-                <p className="font-bold text-lg animate-pulse">Sincronizando datosm.json...</p>
+                <p className="font-bold text-lg animate-pulse">Sincronizando con Drive...</p>
             </div>
         )}
 
