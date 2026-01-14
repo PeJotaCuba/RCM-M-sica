@@ -172,31 +172,49 @@ const App: React.FC = () => {
 
       setIsUpdating(true);
       
-      // Google Drive Direct Download Link (ID extracted from view link)
       const FILE_ID = "1qgsO1JFVbSw1Q1Z-1b2stT2U7h2Vw7W6";
-      const driveUrl = `https://drive.google.com/uc?export=download&id=${FILE_ID}`;
+      const directUrl = `https://drive.google.com/uc?export=download&id=${FILE_ID}`;
       
-      // Using a CORS proxy can be necessary for client-side fetches from Drive, 
-      // but let's try direct first or use a standard proxy if it fails.
-      // A common reliable trick for public drive files in React apps involves using a proxy 
-      // if direct fetch is blocked by CORS policy.
-      // Trying direct fetch first. If it fails, users might need to use a CORS extension or we use a proxy.
-      // For this implementation, we will assume standard fetch works or add a fallback proxy.
+      // Strategy: Try proxies first because direct fetch from browser almost always fails CORS.
+      // We try corsproxy.io first (fast), then allorigins (reliable backup).
+      const attempts = [
+          `https://corsproxy.io/?${encodeURIComponent(directUrl)}`,
+          `https://api.allorigins.win/raw?url=${encodeURIComponent(directUrl)}`
+      ];
+
+      let jsonData: any = null;
+      let success = false;
+
+      for (const url of attempts) {
+          try {
+              console.log("Intentando descargar base de datos...");
+              const response = await fetch(url);
+              if (response.ok) {
+                  // Some proxies might return text/plain or other types, ensure we parse it as JSON
+                  const text = await response.text();
+                  try {
+                      jsonData = JSON.parse(text);
+                      // Basic validation to ensure it's not a proxy error page
+                      if (Array.isArray(jsonData) || (typeof jsonData === 'object' && (jsonData.tracks || jsonData.users))) {
+                           success = true;
+                           break; // Stop trying other proxies
+                      }
+                  } catch (parseError) {
+                      console.warn("JSON Parse error", parseError);
+                  }
+              }
+          } catch (e) {
+              console.warn("Fallo intento de descarga en proxy", e);
+          }
+      }
+
+      if (!success || !jsonData) {
+          setIsUpdating(false);
+          alert("Error: No se pudo descargar el archivo de configuración. \n\nPosibles causas:\n1. Bloqueo de red (CORS).\n2. El archivo en Drive no es público (Verifique 'Cualquiera con el enlace').\n3. Problema temporal de conectividad.");
+          return;
+      }
       
       try {
-          // Attempt direct fetch
-          let response = await fetch(driveUrl);
-          
-          if (!response.ok) {
-              // Fallback to a CORS proxy if direct fails (common in development)
-               console.log("Direct fetch failed, trying proxy...");
-               response = await fetch(`https://corsproxy.io/?${encodeURIComponent(driveUrl)}`);
-          }
-
-          if (!response.ok) throw new Error("No se pudo descargar datosm.json desde Drive");
-
-          const jsonData = await response.json();
-          
           let trackCount = 0;
           let userCount = 0;
 
@@ -224,15 +242,14 @@ const App: React.FC = () => {
           
           alert(msg);
           
-          // Only reload if we are not in the middle of an active admin session to avoid jarring UX, 
-          // unless on login screen where reload ensures fresh state.
+          // Force reload on login screen to ensure clean state
           if (view === ViewState.LOGIN) {
               window.location.reload();
           }
 
       } catch (error) {
           console.error("Update failed", error);
-          alert("Error al sincronizar con Google Drive. Verifique su conexión.");
+          alert("El archivo descargado tiene un formato incorrecto.");
       } finally {
           setIsUpdating(false);
       }
@@ -246,8 +263,6 @@ const App: React.FC = () => {
       }
       
       // Export current state. 
-      // Note: Currently exporting ONLY tracks to maintain compatibility with original schema.
-      // To export users, one would wrap it: { tracks: tracks, users: users }
       const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(tracks, null, 2));
       const downloadAnchorNode = document.createElement('a');
       downloadAnchorNode.setAttribute("href", dataStr);
