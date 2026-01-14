@@ -16,7 +16,13 @@ const AUTH_KEY = 'rcm_auth_session';
 const USERS_KEY = 'rcm_users_db';
 
 // Default admin if no users exist
-const DEFAULT_ADMIN: User = { username: 'admin', password: 'RCMM26', role: 'admin' };
+const DEFAULT_ADMIN: User = { 
+    username: 'admin', 
+    password: 'RCMM26', 
+    role: 'admin',
+    fullName: 'Administrador Principal',
+    phone: '55555555' 
+};
 
 const App: React.FC = () => {
   const [tracks, setTracks] = useState<Track[]>([]);
@@ -53,6 +59,25 @@ const App: React.FC = () => {
   const updateUsers = (newUsers: User[]) => {
       setUsers(newUsers);
       localStorage.setItem(USERS_KEY, JSON.stringify(newUsers));
+      
+      // If the current user was modified or deleted, we need to verify session integrity
+      if (currentUser) {
+          const stillExists = newUsers.find(u => u.username === currentUser.username);
+          
+          // Logic: If user deleted OR password changed, force logout.
+          // If just details changed (name/phone), update current session.
+          if (!stillExists) {
+               handleLogout();
+               alert("Su usuario ha sido eliminado. La sesión se ha cerrado.");
+          } else if (stillExists.password !== currentUser.password) {
+               handleLogout();
+               alert("Su contraseña ha cambiado. Por favor inicie sesión nuevamente.");
+          } else {
+               // Update session info seamlessly
+               setCurrentUser(stillExists);
+               localStorage.setItem(AUTH_KEY, JSON.stringify(stillExists));
+          }
+      }
   };
 
   // Initialize
@@ -66,29 +91,39 @@ const App: React.FC = () => {
         } catch (e) { console.warn("DB Corrupt"); }
     }
 
-    // 2. Users
+    // 2. Users & Session Validation
     const localUsers = localStorage.getItem(USERS_KEY);
+    let currentUsersList = [DEFAULT_ADMIN];
+
     if (localUsers) {
         try {
             const parsed = JSON.parse(localUsers);
-            if (Array.isArray(parsed) && parsed.length > 0) setUsers(parsed);
-            else setUsers([DEFAULT_ADMIN]);
-        } catch { setUsers([DEFAULT_ADMIN]); }
-    } else {
-        setUsers([DEFAULT_ADMIN]);
-    }
-
-    // 3. Session (Simplified: just clear on reload or keep? Let's keep for convenience)
-    const savedUser = localStorage.getItem(AUTH_KEY);
-    if (savedUser) {
-        try {
-            const userObj = JSON.parse(savedUser);
-            if (userObj && userObj.role) {
-                setCurrentUser(userObj);
-                setAuthMode(userObj.role);
-                setView(ViewState.LIST);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+                currentUsersList = parsed;
             }
         } catch { }
+    }
+    setUsers(currentUsersList);
+
+    // 3. Restore Session with Validation
+    const savedUserStr = localStorage.getItem(AUTH_KEY);
+    if (savedUserStr) {
+        try {
+            const savedUser = JSON.parse(savedUserStr);
+            // Verify if user still exists in the DB and matches credentials
+            const validUser = currentUsersList.find(u => u.username === savedUser.username && u.password === savedUser.password);
+            
+            if (validUser) {
+                setCurrentUser(validUser);
+                setAuthMode(validUser.role);
+                setView(ViewState.LIST);
+            } else {
+                // Invalid session (user deleted or changed)
+                localStorage.removeItem(AUTH_KEY);
+            }
+        } catch { 
+            localStorage.removeItem(AUTH_KEY);
+        }
     }
   }, []);
 
@@ -112,7 +147,16 @@ const App: React.FC = () => {
   const handleAddUser = (u: User) => {
       updateUsers([...users, u]);
   };
+  
+  const handleEditUser = (updatedUser: User) => {
+      updateUsers(users.map(u => u.username === updatedUser.username ? updatedUser : u));
+  };
+
   const handleDeleteUser = (username: string) => {
+      if (users.length <= 1) {
+          alert("No se puede eliminar el último usuario.");
+          return;
+      }
       updateUsers(users.filter(u => u.username !== username));
   };
 
@@ -354,6 +398,7 @@ const App: React.FC = () => {
                     tracks={tracks}
                     users={users}
                     onAddUser={handleAddUser}
+                    onEditUser={handleEditUser}
                     onDeleteUser={handleDeleteUser}
                 />
             )}

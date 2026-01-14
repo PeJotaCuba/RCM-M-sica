@@ -8,18 +8,21 @@ interface LoginScreenProps {
 }
 
 const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, users }) => {
-  const [username, setUsername] = useState('');
+  const [identifier, setIdentifier] = useState(''); // Can be username or phone
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
 
   const handleLoginSubmit = () => {
-    if (!username || !password) {
-        setError("Por favor ingrese usuario y contraseña");
+    if (!identifier || !password) {
+        setError("Por favor ingrese credenciales");
         return;
     }
 
-    const user = users.find(u => u.username === username && u.password === password);
+    const user = users.find(u => 
+        (u.username === identifier || u.phone === identifier) && 
+        u.password === password
+    );
     
     if (user) {
         onLoginSuccess(user);
@@ -55,16 +58,16 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, users }) => {
 
              <div className="w-full space-y-4">
                  <div>
-                     <label className="block text-xs font-bold text-gray-500 mb-1 ml-1">Usuario</label>
+                     <label className="block text-xs font-bold text-gray-500 mb-1 ml-1">Usuario o Teléfono</label>
                      <div className="relative">
                          <span className="material-symbols-outlined absolute left-3 top-3 text-gray-400 text-lg">person</span>
                          <input 
                             type="text"
-                            placeholder="Nombre de usuario"
+                            placeholder="Usuario o # Teléfono"
                             className="w-full pl-10 pr-4 py-3 rounded-xl bg-gray-50 dark:bg-black/20 border border-gray-200 dark:border-gray-700 focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
-                            value={username}
+                            value={identifier}
                             onChange={(e) => {
-                                setUsername(e.target.value);
+                                setIdentifier(e.target.value);
                                 setError('');
                             }}
                          />

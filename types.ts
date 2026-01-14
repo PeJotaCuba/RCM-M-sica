@@ -23,6 +23,8 @@ export interface User {
   username: string;
   password: string;
   role: 'admin' | 'guest'; // 'guest' en código, 'Usuario' en UI
+  fullName: string;
+  phone: string;
 }
 
 export enum ViewState {
