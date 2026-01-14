@@ -1,6 +1,99 @@
-
-
 import { Track } from "./types";
+
+export const parseTxtDatabase = (text: string): Track[] => {
+  const tracks: Track[] = [];
+  const lines = text.split('\n');
+  
+  let currentTitle = "";
+  let currentAuthor = "";
+  let currentAuthorCountry = "";
+  let currentPerformer = "";
+  let currentPerformerCountry = "";
+  let currentGenre = "";
+  let currentAlbum = "";
+  let currentYear = "";
+
+  const saveTrack = () => {
+      if (currentTitle) {
+          tracks.push({
+              id: `txt-${Date.now()}-${tracks.length}`,
+              filename: `${currentTitle}.mp3`,
+              path: currentAlbum || 'Importado/Txt',
+              size: '---',
+              isVerified: true,
+              metadata: {
+                  title: currentTitle,
+                  author: currentAuthor,
+                  authorCountry: currentAuthorCountry,
+                  performer: currentPerformer,
+                  performerCountry: currentPerformerCountry,
+                  album: currentAlbum || 'Carpeta General',
+                  year: currentYear,
+                  genre: currentGenre
+              }
+          });
+      }
+      // Reset
+      currentTitle = "";
+      currentAuthor = "";
+      currentAuthorCountry = "";
+      currentPerformer = "";
+      currentPerformerCountry = "";
+      currentGenre = "";
+      currentAlbum = "";
+      currentYear = "";
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+
+      const lowerLine = line.toLowerCase();
+
+      if (lowerLine.startsWith('título:') || lowerLine.startsWith('titulo:')) {
+          if (currentTitle) saveTrack(); 
+          currentTitle = line.substring(line.indexOf(':') + 1).trim();
+      } 
+      else if (lowerLine.startsWith('autor:') || lowerLine.startsWith('compositor:')) {
+          currentAuthor = line.substring(line.indexOf(':') + 1).trim();
+      }
+      else if (lowerLine.startsWith('intérprete:') || lowerLine.startsWith('interprete:')) {
+          currentPerformer = line.substring(line.indexOf(':') + 1).trim();
+      }
+      else if (lowerLine.startsWith('país:') || lowerLine.startsWith('pais:')) {
+          const val = line.substring(line.indexOf(':') + 1).trim();
+          if (currentPerformer && !currentPerformerCountry) {
+              currentPerformerCountry = val;
+          } 
+          else if (currentAuthor && !currentAuthorCountry) {
+              currentAuthorCountry = val;
+          }
+          else {
+               if (!currentAuthorCountry) currentAuthorCountry = val;
+               else currentPerformerCountry = val;
+          }
+      }
+      else if (lowerLine.startsWith('país autor:') || lowerLine.startsWith('pais autor:')) {
+          currentAuthorCountry = line.substring(line.indexOf(':') + 1).trim();
+      }
+      else if (lowerLine.startsWith('país intérprete:') || lowerLine.startsWith('pais intérprete:') || lowerLine.startsWith('pais interprete:')) {
+          currentPerformerCountry = line.substring(line.indexOf(':') + 1).trim();
+      }
+      else if (lowerLine.startsWith('género:') || lowerLine.startsWith('genero:')) {
+          currentGenre = line.substring(line.indexOf(':') + 1).trim();
+      }
+      else if (lowerLine.startsWith('álbum:') || lowerLine.startsWith('album:') || lowerLine.startsWith('carpeta:')) {
+          currentAlbum = line.substring(line.indexOf(':') + 1).trim();
+      }
+      else if (lowerLine.startsWith('año:') || lowerLine.startsWith('ano:') || lowerLine.startsWith('fecha:')) {
+          currentYear = line.substring(line.indexOf(':') + 1).trim();
+      }
+  }
+
+  saveTrack(); 
+
+  return tracks;
+};
 
 // Base de datos inicial precargada (Respaldo Offline)
 export const INITIAL_DB_CONTENT = `[
@@ -3303,68 +3396,3 @@ export const INITIAL_DB_CONTENT = `[
     }
   }
 ]`;
-
-export const parseTxtDatabase = (text: string): Track[] => {
-  const tracks: Track[] = [];
-  const cleanText = text.replace(/\r\n/g, '\n');
-  const blocks = cleanText.split(/\n\s*\n/);
-
-  blocks.forEach((block, index) => {
-    const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
-    if (lines.length === 0) return;
-
-    const metadata = {
-      title: '',
-      author: '',
-      authorCountry: '',
-      performer: '',
-      performerCountry: '',
-      album: 'Carpeta General',
-      year: '',
-      genre: ''
-    };
-
-    let currentContext: 'author' | 'performer' | null = null;
-
-    lines.forEach(line => {
-      const lower = line.toLowerCase();
-      
-      if (lower.startsWith('título:') || lower.startsWith('titulo:')) {
-         metadata.title = line.substring(line.indexOf(':') + 1).trim();
-      } else if (lower.startsWith('autor:') || lower.startsWith('compositor:')) {
-         metadata.author = line.substring(line.indexOf(':') + 1).trim();
-         currentContext = 'author';
-      } else if (lower.startsWith('intérprete:') || lower.startsWith('interprete:')) {
-         metadata.performer = line.substring(line.indexOf(':') + 1).trim();
-         currentContext = 'performer';
-      } else if (lower.startsWith('país:') || lower.startsWith('pais:')) {
-         const val = line.substring(line.indexOf(':') + 1).trim();
-         if (currentContext === 'author') metadata.authorCountry = val;
-         else if (currentContext === 'performer') metadata.performerCountry = val;
-      } else if (lower.startsWith('país autor:')) {
-          metadata.authorCountry = line.substring(line.indexOf(':') + 1).trim();
-      } else if (lower.startsWith('país intérprete:')) {
-          metadata.performerCountry = line.substring(line.indexOf(':') + 1).trim();
-      } else if (lower.startsWith('género:') || lower.startsWith('genero:')) {
-          metadata.genre = line.substring(line.indexOf(':') + 1).trim();
-      } else if (lower.startsWith('álbum:') || lower.startsWith('album:') || lower.startsWith('carpeta:')) {
-          metadata.album = line.substring(line.indexOf(':') + 1).trim();
-      } else if (lower.startsWith('año:') || lower.startsWith('anio:')) {
-          metadata.year = line.substring(line.indexOf(':') + 1).trim();
-      }
-    });
-
-    if (metadata.title) {
-       tracks.push({
-          id: `txt-${Date.now()}-${index}`,
-          filename: `${metadata.title}.mp3`,
-          path: metadata.album,
-          size: '---',
-          isVerified: true,
-          metadata: metadata
-       });
-    }
-  });
-
-  return tracks;
-};
