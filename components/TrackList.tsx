@@ -1,28 +1,26 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Track } from '../types';
 
 interface TrackListProps {
   tracks: Track[];
   onSelectTrack: (track: Track) => void;
+  onUploadTxt: (file: File, root: string) => void;
+  isAdmin: boolean;
 }
 
 const FIXED_ROOTS = ['Música 1', 'Música 2', 'Música 3', 'Música 4', 'Música 5'];
 
-const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
+const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTxt, isAdmin }) => {
   const [searchQuery, setSearchQuery] = useState('');
   
   // Navigation State
   const [activeRoot, setActiveRoot] = useState<string>(FIXED_ROOTS[0]); 
   const [currentPath, setCurrentPath] = useState<string>(''); 
 
-  // Reset path when changing root tab
   const handleRootChange = (root: string) => {
       setActiveRoot(root);
       setCurrentPath(''); 
-      // Do not clear search query if user wants to switch tabs while searching? 
-      // Actually, search is global now, so switching tabs shouldn't matter for search, 
-      // but visually we might want to clear search to show the tab content.
       setSearchQuery(''); 
   };
 
@@ -41,8 +39,6 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
   };
 
   const handleFolderClick = (folderPath: string) => {
-      // If we are in search mode, clicking a folder should probably clear search and jump to that context?
-      // Or just drill down. Let's drill down and clear search to show context.
       setCurrentPath(folderPath);
       
       // Determine the root of this folder to set the active tab correctly
@@ -60,6 +56,12 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
     navigator.clipboard.writeText(text).then(() => {
         alert("Ruta copiada al portapapeles");
     });
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (e.target.files && e.target.files[0]) {
+          onUploadTxt(e.target.files[0], activeRoot);
+      }
   };
 
   // --- Filtering Logic ---
@@ -81,12 +83,10 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
           }));
 
           // 2. Find matching FOLDERS
-          // We iterate all paths and check if any segment matches
           const matchingFolders = new Set<string>();
           tracks.forEach(t => {
               if (!t.path) return;
               const segments = t.path.split('/');
-              // Reconstruct progressive paths
               let progressive = "";
               segments.forEach(seg => {
                   progressive = progressive ? `${progressive}/${seg}` : seg;
@@ -103,7 +103,6 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
               key: `folder-${fPath}`
           }));
 
-          // Sort: Folders first, then files
           return [...folderItems.sort((a,b) => a.name.localeCompare(b.name)), ...matchingTracks];
       }
 
@@ -112,7 +111,6 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
       // Filter tracks that belong to the Active Root
       const rootTracks = tracks.filter(t => {
           if (!t.path) return false;
-          // Normalized comparison
           return t.path.toLowerCase().startsWith(activeRoot.toLowerCase());
       });
 
@@ -122,18 +120,11 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
       const filesList: any[] = [];
 
       rootTracks.forEach(t => {
-          // Normalized checks for path matching
-          // t.path: "Música 1/Carpeta/Archivo.mp3"
-          // targetPath: "Música 1"
+          const trackPath = t.path; 
           
-          const trackPath = t.path; // Case sensitive for display, but logic should be careful
-          
-          // Only process if track is inside targetPath
-          // We use simple startsWith because we assume paths are normalized in constants.ts
           if (!trackPath.startsWith(targetPath)) return;
 
           // Check if it's a direct file in this folder
-          // Case 1: t.path is exactly targetPath
           if (trackPath === targetPath || trackPath === targetPath + '/') {
               filesList.push({
                   type: 'track' as const,
@@ -141,18 +132,16 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
                   key: t.id
               });
           } else {
-              // Case 2: It's in a subfolder
-              // Get the relative part
+              // Subfolder
               let relative = trackPath.substring(targetPath.length);
               if (relative.startsWith('/')) relative = relative.substring(1);
               
-              if (!relative) return; // Should not happen if logic above is correct
+              if (!relative) return; 
 
               const segments = relative.split('/');
               const nextFolder = segments[0];
 
               if (nextFolder) {
-                  // Reconstruct full path for the folder item
                   const fullFolderPath = targetPath === '' ? nextFolder : `${targetPath}/${nextFolder}`;
                   foldersMap.add(fullFolderPath);
               }
@@ -179,7 +168,7 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
       {/* Header Area */}
       <div className="bg-white dark:bg-background-dark shadow-sm border-b border-gray-200 dark:border-gray-800 sticky top-0 z-10">
         
-        {/* 1. FIXED TABS - Only show if NOT searching */}
+        {/* 1. FIXED TABS */}
         {!searchQuery && (
             <div className="flex w-full overflow-x-auto no-scrollbar bg-azul-header text-white">
                 {FIXED_ROOTS.map(root => (
@@ -200,7 +189,7 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
         {/* 2. Tools & Breadcrumbs */}
         <div className="px-4 py-3 flex flex-col gap-3">
             
-            {/* Search Bar - Always Visible */}
+            {/* Search Bar */}
              <label className="flex-1 flex flex-col relative">
                 <div className="flex w-full items-stretch rounded-lg h-11 overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-zinc-900 transition-all focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/30">
                 <div className="text-gray-400 flex items-center justify-center pl-3">
@@ -223,7 +212,6 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
                 </div>
             </label>
 
-            {/* Breadcrumb Path Display (Only when NOT searching) */}
             {!searchQuery && (
                 <div className="flex items-center gap-2 text-gray-500 text-xs min-h-[20px]">
                     <span className="material-symbols-outlined text-base text-miel">hard_drive</span>
@@ -237,7 +225,6 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
                         </>
                     )}
                     
-                    {/* UP Button */}
                     {currentPath && currentPath !== activeRoot && (
                         <button 
                             onClick={handleNavigateUp}
@@ -250,7 +237,6 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
                 </div>
             )}
             
-            {/* Search Results Count hint */}
             {searchQuery && (
                 <div className="text-xs text-gray-500 px-1 font-semibold flex justify-between">
                     <span>Resultados para "{searchQuery}"</span>
@@ -262,6 +248,17 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
 
       {/* List Content */}
       <div className="flex-1 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-800 pb-24 bg-white dark:bg-background-dark">
+        {/* Upload Area - Show if not searching and user is admin */}
+        {!searchQuery && isAdmin && (
+            <div className="p-4 bg-gray-50 dark:bg-white/5 border-b border-dashed border-gray-300 dark:border-gray-700">
+                <label className="flex items-center justify-center gap-3 p-3 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg cursor-pointer hover:border-primary hover:bg-white dark:hover:bg-white/10 transition-all group">
+                    <span className="material-symbols-outlined text-gray-400 group-hover:text-primary">upload_file</span>
+                    <span className="text-xs font-bold text-gray-500 group-hover:text-primary">Cargar TXT en {activeRoot}</span>
+                    <input type="file" accept=".txt" onChange={handleFileChange} className="hidden" />
+                </label>
+            </div>
+        )}
+
         {displayItems.length === 0 ? (
            <div className="flex flex-col items-center justify-center py-20 text-gray-400">
              <span className="material-symbols-outlined text-5xl mb-4 text-gray-200 dark:text-gray-700">
@@ -269,7 +266,7 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
              </span>
              <p className="text-sm font-medium">{searchQuery ? 'Sin resultados' : 'Carpeta vacía'}</p>
              <p className="text-xs mt-1 opacity-60">
-                 {searchQuery ? 'Intenta con otro término' : 'No se encontraron elementos en esta ruta'}
+                 {searchQuery ? 'Intenta con otro término' : 'No se encontraron elementos'}
              </p>
            </div>
         ) : (

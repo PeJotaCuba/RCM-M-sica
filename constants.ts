@@ -1,116 +1,107 @@
 
 import { Track } from "./types";
 
-export const parseTxtDatabase = (text: string): Track[] => {
+/**
+ * Parsea el contenido de los TXT y asigna la ruta basándose en el "rootContext" (Música 1, Música 2...).
+ * Formato esperado en TXT:
+ * Archivo #...
+ * Titulo: ...
+ * Compositor: ... (o Autor)
+ * Interprete: ...
+ * Carpeta: ...
+ * Ruta: ...
+ */
+export const parseTxtDatabase = (text: string, rootContext: string = 'Importado'): Track[] => {
   const tracks: Track[] = [];
-  // Normalizar saltos de línea y separar por líneas
+  // Normalizar saltos de línea
   const normalizedText = text.replace(/\r\n/g, '\n');
   const lines = normalizedText.split('\n');
   
   let currentTitle = "";
   let currentAuthor = "";
-  let currentAuthorCountry = "";
   let currentPerformer = "";
-  let currentPerformerCountry = "";
-  let currentGenre = "";
-  let currentAlbum = "";
-  let currentYear = "";
-
+  let currentAlbum = ""; // Mapped from "Carpeta"
+  let currentOriginalPath = ""; // Mapped from "Ruta"
+  
   const saveTrack = () => {
       if (currentTitle) {
           const cleanTitle = currentTitle.trim();
           
-          // --- PROCESAMIENTO DE RUTA ---
-          let rawPath = (currentAlbum || 'Importado/Txt').trim();
+          // Lógica de Ruta:
+          // 1. Tomamos "Ruta" del TXT o "Carpeta" si Ruta no existe.
+          // 2. Limpiamos letras de unidad (D:\...)
+          // 3. Preponemos el rootContext (Ej: "Música 1")
           
-          // 1. Convertir backslashes a slashes
-          let normalizedPath = rawPath.replace(/\\/g, '/');
+          let rawPathSegment = currentOriginalPath || currentAlbum || 'Desconocido';
           
-          // 2. Eliminar letra de unidad si existe (ej: "F:/Música 1" -> "/Música 1")
-          normalizedPath = normalizedPath.replace(/^[a-zA-Z]:/, '');
+          // Limpieza básica de la ruta original del TXT
+          let cleanSegment = rawPathSegment.replace(/\\/g, '/'); // Backslash a Slash
+          cleanSegment = cleanSegment.replace(/^[a-zA-Z]:/, ''); // Quitar C: D:
+          cleanSegment = cleanSegment.replace(/\/+$/, '').replace(/^\/+/, ''); // Trim slashes
           
-          // 3. Eliminar slashes iniciales y finales para tener una ruta relativa limpia
-          normalizedPath = normalizedPath.replace(/\/+$/, '').replace(/^\/+/, '');
-
-          // Si la ruta quedó vacía después de limpiar, asignar 'Desconocido'
-          if (!normalizedPath) normalizedPath = 'Desconocido';
+          // Si la ruta original ya incluye el rootContext, tratamos de no duplicarlo, 
+          // pero asumiremos que el usuario carga en la pestaña correcta.
+          // Forzamos la estructura: Música X / Ruta del Txt
+          const finalPath = `${rootContext}/${cleanSegment}`;
 
           tracks.push({
-              id: `txt-${Date.now()}-${tracks.length}`,
+              id: `track-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
               filename: `${cleanTitle}.mp3`,
-              path: normalizedPath,
+              path: finalPath,
               size: '---',
               isVerified: true,
               metadata: {
                   title: cleanTitle,
-                  author: currentAuthor,
-                  authorCountry: currentAuthorCountry,
-                  performer: currentPerformer,
-                  performerCountry: currentPerformerCountry,
-                  album: normalizedPath.split('/').pop() || 'Desconocido', // El nombre de la carpeta final
-                  year: currentYear,
-                  genre: currentGenre
+                  author: currentAuthor || "Desconocido",
+                  authorCountry: "", // El formato TXT dado no especifica país explícito, se deja vacío
+                  performer: currentPerformer || "Desconocido",
+                  performerCountry: "",
+                  album: currentAlbum || "Desconocido",
+                  year: "", // El formato dado no tiene año
+                  genre: ""
               }
           });
       }
-      // Reset
+      // Reset variables
       currentTitle = "";
       currentAuthor = "";
-      currentAuthorCountry = "";
       currentPerformer = "";
-      currentPerformerCountry = "";
-      currentGenre = "";
       currentAlbum = "";
-      currentYear = "";
+      currentOriginalPath = "";
   };
 
   for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();
       if (!line) continue;
-
+      
       const lowerLine = line.toLowerCase();
 
-      if (lowerLine.startsWith('título:') || lowerLine.startsWith('titulo:')) {
-          if (currentTitle) saveTrack(); 
+      // Detección de nuevo bloque (Archivo #)
+      if (lowerLine.startsWith('archivo #') || lowerLine.startsWith('archivo n')) {
+          // Si ya teníamos datos acumulados, guardamos el anterior
+          if (currentTitle) saveTrack();
+          continue;
+      }
+
+      if (lowerLine.startsWith('titulo:') || lowerLine.startsWith('título:')) {
           currentTitle = line.substring(line.indexOf(':') + 1).trim();
       } 
-      else if (lowerLine.startsWith('autor:') || lowerLine.startsWith('compositor:')) {
+      else if (lowerLine.startsWith('compositor:') || lowerLine.startsWith('autor:')) {
           currentAuthor = line.substring(line.indexOf(':') + 1).trim();
       }
-      else if (lowerLine.startsWith('intérprete:') || lowerLine.startsWith('interprete:')) {
+      else if (lowerLine.startsWith('interprete:') || lowerLine.startsWith('intérprete:')) {
           currentPerformer = line.substring(line.indexOf(':') + 1).trim();
       }
-      else if (lowerLine.startsWith('país:') || lowerLine.startsWith('pais:')) {
-          const val = line.substring(line.indexOf(':') + 1).trim();
-          if (currentPerformer && !currentPerformerCountry) {
-              currentPerformerCountry = val;
-          } 
-          else if (currentAuthor && !currentAuthorCountry) {
-              currentAuthorCountry = val;
-          }
-          else {
-               if (!currentAuthorCountry) currentAuthorCountry = val;
-               else currentPerformerCountry = val;
-          }
-      }
-      else if (lowerLine.startsWith('país autor:')) {
-          currentAuthorCountry = line.substring(line.indexOf(':') + 1).trim();
-      }
-      else if (lowerLine.startsWith('país intérprete:') || lowerLine.startsWith('pais intérprete:') || lowerLine.startsWith('pais interprete:')) {
-          currentPerformerCountry = line.substring(line.indexOf(':') + 1).trim();
-      }
-      else if (lowerLine.startsWith('género:') || lowerLine.startsWith('genero:')) {
-          currentGenre = line.substring(line.indexOf(':') + 1).trim();
-      }
-      else if (lowerLine.startsWith('álbum:') || lowerLine.startsWith('album:') || lowerLine.startsWith('carpeta:') || lowerLine.startsWith('ruta:')) {
+      else if (lowerLine.startsWith('carpeta:') || lowerLine.startsWith('album:')) {
           currentAlbum = line.substring(line.indexOf(':') + 1).trim();
       }
-      else if (lowerLine.startsWith('año:') || lowerLine.startsWith('ano:') || lowerLine.startsWith('fecha:')) {
-          currentYear = line.substring(line.indexOf(':') + 1).trim();
+      else if (lowerLine.startsWith('ruta:')) {
+          currentOriginalPath = line.substring(line.indexOf(':') + 1).trim();
       }
   }
 
-  saveTrack(); 
+  // Guardar el último track si quedó pendiente
+  if (currentTitle) saveTrack(); 
 
   return tracks;
 };

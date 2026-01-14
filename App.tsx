@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Track, ViewState, CreditInfo, AuthMode } from './types';
-import { INITIAL_DB_TXT, parseTxtDatabase } from './constants';
+import { parseTxtDatabase } from './constants';
 import TrackList from './components/TrackList';
 import TrackDetail from './components/TrackDetail';
 import CreditResults from './components/CreditResults';
@@ -10,7 +10,6 @@ import Settings from './components/Settings';
 import Productions from './components/Productions';
 import { fetchCreditsFromGemini } from './services/geminiService';
 import * as XLSX from 'xlsx';
-import JSZip from 'jszip';
 
 const DB_KEY = 'rcm_db_datosm';
 const AUTH_KEY = 'rcm_auth_session';
@@ -52,7 +51,6 @@ const App: React.FC = () => {
                 const parsed = JSON.parse(localData);
                 if (Array.isArray(parsed)) {
                     setTracks(parsed);
-                    console.log("Cargado desde Local Storage");
                 }
             } catch (e) {
                 console.warn("Datos locales corruptos");
@@ -83,63 +81,81 @@ const App: React.FC = () => {
       setRecentTracks([]);
   };
 
+  // --- SYNC WITH GITHUB (JSON) ---
   const handleUpdateDatabase = async () => {
       const confirmUpdate = window.confirm(
-          `¿Actualizar base de datos musical?\n\nSe descargará y procesará el archivo 'Info.zip' desde GitHub.\n\nEsto puede tardar unos segundos dependiendo de su conexión.`
+          `¿Sincronizar con GitHub?\n\nSe buscará el archivo 'datosm.json' en el repositorio.\nEsto reemplazará la base de datos local con la versión de la nube.`
       );
       if (!confirmUpdate) return;
 
       setIsUpdating(true);
-      let totalTracks: Track[] = [];
-      let filesProcessed = 0;
-
-      const zipUrl = 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/main/Info.zip';
-      const fallbackUrl = 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/master/Info.zip';
+      
+      // Use Raw Git URLs
+      const jsonUrl = 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/main/datosm.json';
+      const fallbackUrl = 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/master/datosm.json';
 
       try {
-          // 1. Descargar el ZIP como ArrayBuffer
-          let response = await fetch(zipUrl);
+          let response = await fetch(jsonUrl);
           if (!response.ok) {
               console.log("Intentando URL alternativa...");
               response = await fetch(fallbackUrl);
           }
           
-          if (!response.ok) throw new Error("No se pudo descargar Info.zip");
+          if (!response.ok) throw new Error("No se pudo descargar datosm.json");
 
-          const blob = await response.arrayBuffer();
-
-          // 2. Abrir con JSZip
-          const zip = await JSZip.loadAsync(blob);
+          const jsonData = await response.json();
           
-          // 3. Iterar archivos
-          const filePromises: Promise<void>[] = [];
-
-          zip.forEach((relativePath, zipEntry) => {
-              if (zipEntry.name.toLowerCase().endsWith('.txt') && !zipEntry.name.startsWith('__MACOSX')) {
-                  const promise = zipEntry.async('string').then(content => {
-                      const newTracks = parseTxtDatabase(content);
-                      totalTracks = [...totalTracks, ...newTracks];
-                      filesProcessed++;
-                  });
-                  filePromises.push(promise);
-              }
-          });
-
-          await Promise.all(filePromises);
-
-          if (totalTracks.length > 0) {
-               updateTracks(totalTracks);
-               alert(`Actualización completada con éxito.\nSe procesaron ${filesProcessed} archivos TXT dentro del ZIP.\nTotal de temas indexados: ${totalTracks.length}.`);
-               window.location.reload(); 
+          if (Array.isArray(jsonData) && jsonData.length > 0) {
+               updateTracks(jsonData);
+               alert(`Sincronización exitosa.\nSe cargaron ${jsonData.length} temas.`);
+               window.location.reload();
           } else {
-              alert("El archivo ZIP se descargó pero no se encontraron datos válidos en los archivos de texto.");
+              alert("El archivo JSON descargado está vacío o tiene un formato incorrecto.");
           }
       } catch (error) {
           console.error("Update failed", error);
-          alert("Error durante la actualización. Verifique que 'Info.zip' existe en el repositorio y revise su conexión.");
+          alert("Error al sincronizar. Asegúrese de que 'datosm.json' existe en el repositorio.");
       } finally {
           setIsUpdating(false);
       }
+  };
+
+  // --- EXPORT JSON ---
+  const handleExportDatabase = () => {
+      if (tracks.length === 0) {
+          alert("No hay datos para exportar.");
+          return;
+      }
+      
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(tracks, null, 2));
+      const downloadAnchorNode = document.createElement('a');
+      downloadAnchorNode.setAttribute("href", dataStr);
+      downloadAnchorNode.setAttribute("download", "datosm.json");
+      document.body.appendChild(downloadAnchorNode);
+      downloadAnchorNode.click();
+      downloadAnchorNode.remove();
+  };
+
+  // --- HANDLE MANUAL TXT UPLOAD PER TAB ---
+  const handleUploadTxt = async (file: File, targetRoot: string) => {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+          const text = e.target?.result;
+          if (typeof text === 'string') {
+              const newTracks = parseTxtDatabase(text, targetRoot);
+              if (newTracks.length > 0) {
+                  // Merge: Remove old tracks from this root to replace with new ones? 
+                  // Or just append? 
+                  // Better approach: Remove previous tracks belonging to this Root to avoid duplicates, then add new ones.
+                  // But user might upload multiple files for one root. Let's just Append for now.
+                  updateTracks(prev => [...prev, ...newTracks]);
+                  alert(`Se han añadido ${newTracks.length} temas a ${targetRoot}.`);
+              } else {
+                  alert("No se encontraron temas en el archivo TXT. Verifique el formato.");
+              }
+          }
+      };
+      reader.readAsText(file);
   };
 
   const handleSelectTrack = (track: Track) => {
@@ -198,8 +214,8 @@ const App: React.FC = () => {
   };
 
   const handleImportFolders = async (file: File) => {
-      if (!file) return;
-      alert("Para importar masivamente, use la opción de actualización desde GitHub (ZIP) en la pantalla de inicio.");
+     // Replaced by per-tab upload, but kept for legacy settings compatibility if needed
+     handleUploadTxt(file, "Importado");
   };
 
   const handleImportCredits = async (file: File) => {
@@ -216,8 +232,7 @@ const App: React.FC = () => {
             {isUpdating && (
                 <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm text-white">
                     <div className="size-16 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4"></div>
-                    <p className="font-bold text-lg animate-pulse">Descargando y procesando Info.zip...</p>
-                    <p className="text-sm text-gray-400 mt-2">Por favor espere</p>
+                    <p className="font-bold text-lg animate-pulse">Sincronizando datosm.json...</p>
                 </div>
             )}
             <LoginScreen onLogin={handleLogin} onUpdate={handleUpdateDatabase} />
@@ -236,34 +251,45 @@ const App: React.FC = () => {
                     </h1>
                 </div>
                 {/* Auth Controls */}
-                <div className="flex items-center gap-4">
-                    <div className={`text-[10px] font-bold px-2 py-0.5 rounded shadow-sm ${authMode === 'admin' ? 'bg-miel text-white' : 'bg-green-600 text-white'}`}>
-                        {authMode === 'admin' ? 'ADMIN' : 'USUARIO'}
-                    </div>
-                    <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
+                    {/* Botón Exportar JSON */}
+                    {authMode === 'admin' && view === ViewState.LIST && (
                         <button 
-                            onClick={handleUpdateDatabase}
-                            className={`text-white bg-white/10 hover:bg-white/20 p-2 rounded-full transition-colors flex items-center justify-center size-10 ${isUpdating ? 'animate-spin bg-white/30' : ''}`}
-                            title="Sincronizar Info.zip desde GitHub"
-                            disabled={isUpdating}
+                            onClick={handleExportDatabase}
+                            className="text-white bg-white/10 hover:bg-green-500/50 p-2 rounded-full transition-colors flex items-center justify-center size-10"
+                            title="Exportar datosm.json"
                         >
-                            <span className="material-symbols-outlined text-xl">sync_alt</span>
+                            <span className="material-symbols-outlined text-xl">save_alt</span>
                         </button>
-                        <button 
-                            onClick={handleLogout}
-                            className="text-white bg-white/10 hover:bg-red-500/50 p-2 rounded-full transition-colors flex items-center justify-center size-10"
-                            title="Cerrar Sesión"
-                        >
-                            <span className="material-symbols-outlined text-xl">logout</span>
-                        </button>
-                    </div>
+                    )}
+                    
+                    <button 
+                        onClick={handleUpdateDatabase}
+                        className={`text-white bg-white/10 hover:bg-white/20 p-2 rounded-full transition-colors flex items-center justify-center size-10 ${isUpdating ? 'animate-spin bg-white/30' : ''}`}
+                        title="Sincronizar Github"
+                        disabled={isUpdating}
+                    >
+                        <span className="material-symbols-outlined text-xl">sync_alt</span>
+                    </button>
+                    <button 
+                        onClick={handleLogout}
+                        className="text-white bg-white/10 hover:bg-red-500/50 p-2 rounded-full transition-colors flex items-center justify-center size-10"
+                        title="Cerrar Sesión"
+                    >
+                        <span className="material-symbols-outlined text-xl">logout</span>
+                    </button>
                 </div>
             </header>
         )}
 
         <div className="flex-1 overflow-hidden relative">
             {view === ViewState.LIST && (
-                <TrackList tracks={tracks} onSelectTrack={handleSelectTrack} />
+                <TrackList 
+                    tracks={tracks} 
+                    onSelectTrack={handleSelectTrack} 
+                    onUploadTxt={handleUploadTxt}
+                    isAdmin={authMode === 'admin'}
+                />
             )}
 
             {view === ViewState.RECENT && (
@@ -273,7 +299,12 @@ const App: React.FC = () => {
                              <p>No hay temas recientes</p>
                         </div>
                     ) : (
-                        <TrackList tracks={recentTracks} onSelectTrack={handleSelectTrack} />
+                        <TrackList 
+                            tracks={recentTracks} 
+                            onSelectTrack={handleSelectTrack} 
+                            onUploadTxt={() => {}} // No upload in recent
+                            isAdmin={false}
+                        />
                     )}
                 </div>
             )}
