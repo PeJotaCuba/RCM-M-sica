@@ -19,9 +19,21 @@ export const parseTxtDatabase = (text: string): Track[] => {
   const saveTrack = () => {
       if (currentTitle) {
           const cleanTitle = currentTitle.trim();
-          // Normalizar ruta: Reemplazar backslash por slash y quitar slashes finales/iniciales
-          let normalizedPath = (currentAlbum || 'Importado/Txt').replace(/\\/g, '/');
+          
+          // --- PROCESAMIENTO DE RUTA ---
+          let rawPath = (currentAlbum || 'Importado/Txt').trim();
+          
+          // 1. Convertir backslashes a slashes
+          let normalizedPath = rawPath.replace(/\\/g, '/');
+          
+          // 2. Eliminar letra de unidad si existe (ej: "F:/Música 1" -> "/Música 1")
+          normalizedPath = normalizedPath.replace(/^[a-zA-Z]:/, '');
+          
+          // 3. Eliminar slashes iniciales y finales para tener una ruta relativa limpia
           normalizedPath = normalizedPath.replace(/\/+$/, '').replace(/^\/+/, '');
+
+          // Si la ruta quedó vacía después de limpiar, asignar 'Desconocido'
+          if (!normalizedPath) normalizedPath = 'Desconocido';
 
           tracks.push({
               id: `txt-${Date.now()}-${tracks.length}`,
@@ -103,5 +115,4 @@ export const parseTxtDatabase = (text: string): Track[] => {
   return tracks;
 };
 
-// Base de datos inicial vacía para forzar actualización
 export const INITIAL_DB_TXT = ``;
