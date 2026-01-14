@@ -7,46 +7,38 @@ interface TrackListProps {
   onSelectTrack: (track: Track) => void;
 }
 
+const FIXED_ROOTS = ['Música 1', 'Música 2', 'Música 3', 'Música 4', 'Música 5'];
+
 const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
   const [searchQuery, setSearchQuery] = useState('');
   
   // Navigation State
-  const [activeRoot, setActiveRoot] = useState<string>(''); // e.g., "Música 1"
-  const [currentPath, setCurrentPath] = useState<string>(''); // e.g., "Música 1/Salsa/Van Van"
+  const [activeRoot, setActiveRoot] = useState<string>(FIXED_ROOTS[0]); // Default to Música 1
+  const [currentPath, setCurrentPath] = useState<string>(''); 
 
-  // 1. Extract Roots (First segment of every path)
-  const roots = useMemo(() => {
-      const allRoots = new Set<string>();
-      tracks.forEach(t => {
-          if (t.path) {
-              const root = t.path.split('/')[0];
-              if (root) allRoots.add(root);
-          }
-      });
-      return Array.from(allRoots).sort();
-  }, [tracks]);
-
-  // Set default root if none selected
-  useEffect(() => {
-      if (!activeRoot && roots.length > 0) {
-          setActiveRoot(roots[0]);
-      }
-  }, [roots, activeRoot]);
-
-  // Reset path when changing root
+  // Reset path and search when changing root tab
   const handleRootChange = (root: string) => {
       setActiveRoot(root);
-      setCurrentPath(''); // Go to top of new root
+      setCurrentPath(''); 
       setSearchQuery('');
   };
 
   const handleNavigateUp = () => {
-      if (!currentPath) return; // Already at top
+      if (!currentPath) return; 
+      
+      // If currentPath is exactly the root (or just a slash), clear it to show root contents
+      if (currentPath === activeRoot) {
+          setCurrentPath('');
+          return;
+      }
+
+      // Remove last segment
       const segments = currentPath.split('/');
-      segments.pop(); // Remove last folder
+      segments.pop();
       const newPath = segments.join('/');
-      // If newPath becomes just empty or doesn't start with root (shouldn't happen logically but for safety), reset
-      setCurrentPath(newPath);
+      
+      // If we went back too far (empty), just clear it
+      setCurrentPath(newPath || '');
   };
 
   const handleFolderClick = (folderPath: string) => {
@@ -63,13 +55,18 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
 
   // --- Filtering Logic ---
   const displayItems = useMemo(() => {
-      if (!activeRoot) return [];
+      // 1. Filter tracks that belong to the Active Root (e.g. starts with "Música 1")
+      // We normalize matches to handle cases like "Música 1" matching "Música 1/Salsa"
+      const rootTracks = tracks.filter(t => {
+          if (!t.path) return false;
+          // Check if path starts with the active root string
+          return t.path.toLowerCase().startsWith(activeRoot.toLowerCase());
+      });
 
       // A. SEARCH MODE (Scoped to Active Root)
       if (searchQuery.trim()) {
           const lowerQuery = searchQuery.toLowerCase();
-          return tracks
-              .filter(t => t.path.startsWith(activeRoot)) // Only search in current tab
+          return rootTracks
               .filter(t => 
                   t.filename.toLowerCase().includes(lowerQuery) ||
                   t.metadata.title.toLowerCase().includes(lowerQuery) ||
@@ -84,39 +81,40 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
       }
 
       // B. BROWSE MODE
+      // If we are at the "Root Level" (currentPath is empty), we show the first level of folders/files inside "Música X"
+      // If we are deep inside (currentPath = "Música 1/Salsa"), we show contents of that.
       
-      // Determine what to show based on currentPath (or activeRoot if path empty)
       const targetPath = currentPath || activeRoot;
-      const depth = targetPath.split('/').length;
+      const targetDepth = targetPath.split('/').length;
 
-      // 1. Get all tracks that belong to this tree
-      const relevantTracks = tracks.filter(t => t.path.startsWith(targetPath));
-      
       const foldersMap = new Set<string>();
       const filesList: any[] = [];
 
-      relevantTracks.forEach(t => {
-          // If exact match path, it's a file in this folder
-          if (t.path === targetPath) {
+      rootTracks.forEach(t => {
+          // Check if the track belongs to the current view path
+          if (!t.path.startsWith(targetPath)) return;
+
+          // Exact match = File in this folder
+          // Note: We handle the edge case where targetPath might equal activeRoot but the file is directly there
+          if (t.path === targetPath || t.path === targetPath + '/') {
               filesList.push({
                   type: 'track' as const,
                   data: t,
                   key: t.id
               });
           } else {
-              // It's in a subfolder
-              // targetPath: "Música 1"
-              // t.path: "Música 1/Salsa/Van Van"
-              // relative: "/Salsa/Van Van" -> parts: ["", "Salsa", "Van Van"]
-              // We want "Salsa"
-              const remainder = t.path.substring(targetPath.length);
-              // Ensure we strip leading slash
-              const cleanRemainder = remainder.startsWith('/') ? remainder.substring(1) : remainder;
-              const nextSegment = cleanRemainder.split('/')[0];
+              // It is inside a subfolder relative to targetPath
+              // Example: targetPath = "Música 1", t.path = "Música 1/Salsa/Van Van"
+              // Relative = "/Salsa/Van Van"
               
-              if (nextSegment) {
-                  // Construct full path for the folder
-                  const fullFolderPath = targetPath === '' ? nextSegment : `${targetPath}/${nextSegment}`;
+              let relative = t.path.substring(targetPath.length);
+              if (relative.startsWith('/')) relative = relative.substring(1);
+              
+              const segments = relative.split('/');
+              const nextFolder = segments[0];
+
+              if (nextFolder) {
+                  const fullFolderPath = targetPath === '' ? nextFolder : `${targetPath}/${nextFolder}`;
                   foldersMap.add(fullFolderPath);
               }
           }
@@ -129,6 +127,9 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
           key: fPath
       }));
 
+      // Sort files alphabetically
+      filesList.sort((a, b) => a.data.filename.localeCompare(b.data.filename));
+
       return [...foldersList, ...filesList];
 
   }, [tracks, activeRoot, currentPath, searchQuery]);
@@ -136,126 +137,142 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
 
   return (
     <div className="flex flex-col h-full bg-background-light dark:bg-background-dark">
-      {/* Search Header */}
-      <div className="px-4 py-4 bg-white dark:bg-background-dark shadow-sm border-b border-gray-200 dark:border-gray-800 sticky top-0 z-10">
-        <div className="flex flex-col gap-3">
-          
-          {/* ROOT TABS (Música 1, Música 2...) */}
-          <div className="flex w-full bg-gray-100 dark:bg-gray-800 p-1 rounded-xl overflow-x-auto no-scrollbar gap-1">
-             {roots.length === 0 ? (
-                 <span className="text-xs text-gray-400 p-2">Sin datos cargados</span>
-             ) : (
-                 roots.map(root => (
-                    <button 
-                        key={root}
-                        onClick={() => handleRootChange(root)} 
-                        className={`flex-shrink-0 px-4 py-2 text-[10px] sm:text-xs font-bold rounded-lg transition-all whitespace-nowrap ${activeRoot === root ? 'bg-white dark:bg-gray-700 text-primary shadow-sm ring-1 ring-black/5' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'}`}
-                    >
-                        {root}
-                    </button>
-                 ))
-             )}
-          </div>
-
-          <div className="flex gap-2 items-center">
-            {/* Back Button */}
-            {currentPath && currentPath !== activeRoot && !searchQuery && (
+      {/* Header Area */}
+      <div className="bg-white dark:bg-background-dark shadow-sm border-b border-gray-200 dark:border-gray-800 sticky top-0 z-10">
+        
+        {/* 1. FIXED TABS (Música 1 - 5) */}
+        <div className="flex w-full overflow-x-auto no-scrollbar bg-azul-header text-white">
+             {FIXED_ROOTS.map(root => (
                 <button 
-                    onClick={handleNavigateUp}
-                    className="size-12 flex items-center justify-center bg-gray-100 dark:bg-gray-800 rounded-xl text-primary hover:bg-gray-200 transition-colors shrink-0"
-                    title="Subir nivel"
+                    key={root}
+                    onClick={() => handleRootChange(root)} 
+                    className={`flex-1 min-w-[90px] py-4 text-[11px] sm:text-xs font-bold uppercase tracking-wider transition-colors relative ${activeRoot === root ? 'bg-white/10 text-white' : 'text-gray-300 hover:bg-white/5'}`}
                 >
-                    <span className="material-symbols-outlined">arrow_upward</span>
+                    {root}
+                    {activeRoot === root && (
+                        <div className="absolute bottom-0 left-0 w-full h-1 bg-miel"></div>
+                    )}
                 </button>
-            )}
+             ))}
+        </div>
+
+        {/* 2. Breadcrumbs & Tools */}
+        <div className="px-4 py-3 flex flex-col gap-3">
             
-            {/* Search Bar */}
-            <label className="flex-1 flex flex-col relative">
-                <div className="flex w-full items-stretch rounded-xl h-12 overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 transition-all focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/30">
-                <div className="text-gray-400 flex items-center justify-center pl-4">
-                    <span className="material-symbols-outlined">search</span>
-                </div>
-                <input 
-                    className="flex w-full border-none bg-transparent text-gray-900 dark:text-white focus:ring-0 placeholder:text-gray-400 px-3 text-base font-normal leading-normal" 
-                    placeholder={activeRoot ? `Buscar en ${activeRoot}...` : "Selecciona una categoría"}
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    disabled={!activeRoot}
-                />
-                {searchQuery && (
+            {/* Breadcrumb Path Display */}
+            <div className="flex items-center gap-2 text-gray-500 text-xs min-h-[20px]">
+                <span className="material-symbols-outlined text-base text-miel">hard_drive</span>
+                <span className="font-bold text-gray-700 dark:text-gray-300">{activeRoot}</span>
+                {currentPath && currentPath !== activeRoot && (
+                    <>
+                        <span className="material-symbols-outlined text-sm text-gray-400">chevron_right</span>
+                        <span className="truncate font-mono text-gray-600 dark:text-gray-400">
+                            {currentPath.substring(activeRoot.length).replace(/^\//, '').replace(/\//g, ' / ')}
+                        </span>
+                    </>
+                )}
+            </div>
+
+            <div className="flex gap-2 items-center">
+                {/* Back Button (Only visible if deep in folders) */}
+                {currentPath && currentPath !== activeRoot && !searchQuery && (
                     <button 
-                        onClick={() => setSearchQuery('')}
-                        className="pr-4 text-gray-400 hover:text-gray-600 flex items-center"
+                        onClick={handleNavigateUp}
+                        className="size-11 flex items-center justify-center bg-gray-100 dark:bg-gray-800 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-200 transition-colors shrink-0 border border-gray-200 dark:border-gray-700"
+                        title="Subir nivel"
                     >
-                        <span className="material-symbols-outlined text-lg">close</span>
+                        <span className="material-symbols-outlined">arrow_upward</span>
                     </button>
                 )}
-                </div>
-            </label>
-          </div>
-
-          {/* Breadcrumbs (Current Path Display) */}
-          {!searchQuery && currentPath && (
-              <div className="text-[10px] text-gray-500 font-mono truncate px-1 flex items-center gap-1">
-                  <span className="material-symbols-outlined text-xs">folder_open</span>
-                  {currentPath.replace(/\//g, ' / ')}
-              </div>
-          )}
+                
+                {/* Search Bar */}
+                <label className="flex-1 flex flex-col relative">
+                    <div className="flex w-full items-stretch rounded-lg h-11 overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-zinc-900 transition-all focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/30">
+                    <div className="text-gray-400 flex items-center justify-center pl-3">
+                        <span className="material-symbols-outlined text-xl">search</span>
+                    </div>
+                    <input 
+                        className="flex w-full border-none bg-transparent text-gray-900 dark:text-white focus:ring-0 placeholder:text-gray-400 px-3 text-sm font-normal" 
+                        placeholder={`Buscar en ${activeRoot}...`}
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                    />
+                    {searchQuery && (
+                        <button 
+                            onClick={() => setSearchQuery('')}
+                            className="pr-3 text-gray-400 hover:text-gray-600 flex items-center"
+                        >
+                            <span className="material-symbols-outlined text-lg">close</span>
+                        </button>
+                    )}
+                    </div>
+                </label>
+            </div>
         </div>
       </div>
 
       {/* List Content */}
-      <div className="flex-1 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-800 pb-24">
+      <div className="flex-1 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-800 pb-24 bg-white dark:bg-background-dark">
         {displayItems.length === 0 ? (
            <div className="flex flex-col items-center justify-center py-20 text-gray-400">
-             <span className="material-symbols-outlined text-4xl mb-2">folder_off</span>
-             <p className="text-sm">Carpeta vacía o sin resultados</p>
+             <span className="material-symbols-outlined text-5xl mb-4 text-gray-200 dark:text-gray-700">folder_open</span>
+             <p className="text-sm font-medium">Carpeta vacía</p>
+             <p className="text-xs mt-1 opacity-60">No se encontraron elementos en esta ruta</p>
            </div>
         ) : (
           displayItems.map(item => (
             <div 
               key={item.key} 
               onClick={() => item.type === 'folder' ? handleFolderClick(item.fullPath) : onSelectTrack(item.data)}
-              className="group flex items-center gap-4 bg-white dark:bg-background-dark px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer active:scale-[0.99]"
+              className="group flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-white/5 transition-colors cursor-pointer active:bg-gray-100"
             >
               {/* Icon */}
-              <div className={`flex items-center justify-center rounded-xl shrink-0 size-10 border ${item.type === 'track' ? 'bg-primary/5 border-primary/10 text-primary' : 'bg-miel/10 border-miel/20 text-miel'}`}>
-                <span className="material-symbols-outlined text-xl">
+              <div className={`flex items-center justify-center rounded-lg shrink-0 size-10 ${item.type === 'track' ? 'bg-orange-50 text-primary dark:bg-primary/20' : 'bg-blue-50 text-azul-header dark:bg-blue-900/30 dark:text-blue-300'}`}>
+                <span className={`material-symbols-outlined ${item.type === 'folder' ? 'material-symbols-filled' : ''} text-2xl`}>
                     {item.type === 'folder' ? 'folder' : 'music_note'}
                 </span>
               </div>
 
               {/* Text */}
               <div className="flex flex-col flex-1 min-w-0">
-                <p className="text-gray-900 dark:text-gray-100 text-sm font-bold leading-tight truncate">
+                <p className="text-gray-900 dark:text-gray-100 text-sm font-semibold leading-tight truncate">
                   {item.type === 'folder' ? item.name : (item.data.metadata.title || item.data.filename)}
                 </p>
+                
                 {item.type === 'track' && (
-                    <p className="text-gray-500 dark:text-gray-400 text-[10px] mt-0.5 truncate">
-                        {item.data.metadata.performer || "Artista desconocido"}
-                    </p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                        <p className="text-gray-500 dark:text-gray-400 text-[11px] truncate max-w-[80%]">
+                            {item.data.metadata.performer || "Desconocido"}
+                        </p>
+                        {item.data.isVerified && (
+                            <span className="text-[10px] text-green-600 flex items-center" title="Verificado">
+                                <span className="material-symbols-outlined text-[12px]">verified</span>
+                            </span>
+                        )}
+                    </div>
                 )}
-                {/* Show path context if searching */}
-                {searchQuery && item.type === 'track' && (
-                    <p className="text-gray-400 text-[9px] mt-0.5 truncate">
-                        {item.data.path}
+                
+                {/* Show full path hint when searching to know where the file is */}
+                {searchQuery && (
+                    <p className="text-gray-300 text-[9px] mt-0.5 truncate">
+                        {item.type === 'track' ? item.data.path : item.fullPath}
                     </p>
                 )}
               </div>
               
               {/* Actions */}
-              <div className="shrink-0 flex items-center gap-1">
-                 {item.type === 'track' && item.data.path && (
+              <div className="shrink-0 flex items-center">
+                 {item.type === 'folder' ? (
+                     <span className="material-symbols-outlined text-gray-300 dark:text-gray-600 text-xl">chevron_right</span>
+                 ) : (
                      <button 
                         onClick={(e) => copyToClipboard(item.data.path, e)}
-                        className="p-2 rounded-full text-gray-300 hover:text-azul-cauto transition-colors"
+                        className="size-8 flex items-center justify-center rounded-full text-gray-300 hover:text-azul-cauto hover:bg-gray-100 dark:hover:bg-gray-700 transition-all"
+                        title="Copiar ruta"
                      >
                         <span className="material-symbols-outlined text-base">content_copy</span>
                      </button>
                  )}
-                 <span className="material-symbols-outlined text-gray-300 dark:text-gray-600 text-lg">
-                     {item.type === 'folder' ? 'chevron_right' : 'play_arrow'}
-                 </span>
               </div>
             </div>
           ))
