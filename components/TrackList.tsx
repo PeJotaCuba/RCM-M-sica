@@ -1,6 +1,6 @@
 
-import React, { useState, useMemo } from 'react';
-import { Track, FilterType } from '../types';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Track } from '../types';
 
 interface TrackListProps {
   tracks: Track[];
@@ -9,154 +9,49 @@ interface TrackListProps {
 
 const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeFilter, setActiveFilter] = useState<FilterType>('folder'); 
-  const [currentFolder, setCurrentFolder] = useState<string | null>(null);
+  
+  // Navigation State
+  const [activeRoot, setActiveRoot] = useState<string>(''); // e.g., "Música 1"
+  const [currentPath, setCurrentPath] = useState<string>(''); // e.g., "Música 1/Salsa/Van Van"
 
-  // Reset folder view and search when changing filter tab
-  const handleFilterChange = (filter: FilterType) => {
-      setActiveFilter(filter);
-      setCurrentFolder(null);
-      setSearchQuery('');
-  };
-
-  const handleClearSearch = () => {
-      setSearchQuery('');
-  };
-
-  const listItems = useMemo(() => {
-    const query = searchQuery.toLowerCase().trim();
-    
-    // --- MODO BÚSQUEDA GLOBAL ---
-    if (query) {
-        const results = [];
-        const addedIds = new Set();
-
-        // 1. Buscar Carpetas que coincidan
-        const folderMatches = new Map<string, Track[]>();
-        tracks.forEach(t => {
-            const folderName = t.metadata.album || "Sin Carpeta";
-            if (folderName.toLowerCase().includes(query)) {
-                if (!folderMatches.has(folderName)) folderMatches.set(folderName, []);
-                folderMatches.get(folderName)!.push(t);
-            }
-        });
-
-        // Convertir carpetas encontradas a items
-        Array.from(folderMatches.entries()).forEach(([folderName, folderTracks]) => {
-            results.push({
-                id: `folder-${folderName}`,
-                mainText: folderName,
-                subText: `${folderTracks.length} temas coincidentes por carpeta`,
-                type: 'folder',
-                payload: folderName
-            });
-            addedIds.add(`folder-${folderName}`);
-        });
-
-        // 2. Buscar Pistas individuales que coincidan (Título, Autor, Intérprete, Archivo)
-        const trackMatches = tracks.filter(t => 
-            t.filename.toLowerCase().includes(query) ||
-            t.metadata.title.toLowerCase().includes(query) ||
-            t.metadata.author.toLowerCase().includes(query) ||
-            t.metadata.performer.toLowerCase().includes(query)
-        );
-
-        trackMatches.forEach(t => {
-            // Evitar duplicados si ya mostramos la carpeta (opcional, pero el usuario pidió "si aparece nombre de carpeta y tema, mostrar los dos")
-            // Aquí mostramos el tema individualmente
-            results.push({
-                id: t.id,
-                mainText: t.metadata.title || t.filename,
-                subText: t.metadata.performer || "Intérprete desconocido",
-                type: 'track',
-                payload: t,
-                path: t.path
-            });
-        });
-
-        return results;
-    }
-
-    // --- MODO NAVEGACIÓN NORMAL (Sin búsqueda) ---
-    
-    // Filtro base (si estamos dentro de una carpeta, filtramos por ella)
-    let viewTracks = tracks;
-    if (activeFilter === 'folder' && currentFolder) {
-        viewTracks = tracks.filter(t => (t.metadata.album || "Sin Carpeta") === currentFolder);
-    }
-
-    if (activeFilter === 'folder') {
-        if (currentFolder) {
-            // Vista DENTRO de carpeta
-            return viewTracks.map(t => ({
-                id: t.id,
-                mainText: t.metadata.title || t.filename,
-                subText: t.metadata.performer || "Intérprete desconocido",
-                type: 'track',
-                payload: t,
-                path: t.path
-            }));
-        } else {
-            // Vista LISTA de carpetas
-            const uniqueFolders = new Map<string, Track[]>();
-            viewTracks.forEach(t => {
-                const folderName = t.metadata.album || "Sin Carpeta";
-                if (!uniqueFolders.has(folderName)) uniqueFolders.set(folderName, []);
-                uniqueFolders.get(folderName)!.push(t);
-            });
-
-            return Array.from(uniqueFolders.entries())
-                .sort((a,b) => a[0].localeCompare(b[0]))
-                .map(([folderName, folderTracks]) => ({
-                    id: `folder-${folderName}`,
-                    mainText: folderName,
-                    subText: `${folderTracks.length} temas`,
-                    type: 'folder',
-                    payload: folderName
-                }));
-        }
-    } else if (activeFilter === 'title') {
-        return viewTracks.map(t => ({
-            id: t.id,
-            mainText: t.metadata.title || t.filename,
-            subText: t.metadata.performer || "Intérprete desconocido",
-            type: 'track',
-            payload: t,
-            path: t.path
-        }));
-    } else if (activeFilter === 'author') {
-        const authors = Array.from(new Set(viewTracks.map(t => t.metadata.author).filter(Boolean)));
-        return authors.sort().map(author => ({
-            id: `auth-${author}`,
-            mainText: author,
-            subText: "Autor / Compositor",
-            type: 'author',
-            payload: viewTracks.find(t => t.metadata.author === author)!
-        }));
-    } else if (activeFilter === 'performer') {
-        const performers = Array.from(new Set(viewTracks.map(t => t.metadata.performer).filter(Boolean)));
-        return performers.sort().map(perf => ({
-            id: `perf-${perf}`,
-            mainText: perf,
-            subText: "Intérprete",
-            type: 'performer',
-            payload: viewTracks.find(t => t.metadata.performer === perf)!
-        }));
-    }
-    return [];
-  }, [tracks, searchQuery, activeFilter, currentFolder]);
-
-  const handleItemClick = (item: any) => {
-      if (item.type === 'folder') {
-          // Si estamos buscando, al hacer clic en carpeta entramos en ella y limpiamos búsqueda
-          if (searchQuery) {
-              setSearchQuery('');
-              setActiveFilter('folder');
+  // 1. Extract Roots (First segment of every path)
+  const roots = useMemo(() => {
+      const allRoots = new Set<string>();
+      tracks.forEach(t => {
+          if (t.path) {
+              const root = t.path.split('/')[0];
+              if (root) allRoots.add(root);
           }
-          setCurrentFolder(item.payload);
-      } else {
-          onSelectTrack(item.payload);
+      });
+      return Array.from(allRoots).sort();
+  }, [tracks]);
+
+  // Set default root if none selected
+  useEffect(() => {
+      if (!activeRoot && roots.length > 0) {
+          setActiveRoot(roots[0]);
       }
+  }, [roots, activeRoot]);
+
+  // Reset path when changing root
+  const handleRootChange = (root: string) => {
+      setActiveRoot(root);
+      setCurrentPath(''); // Go to top of new root
+      setSearchQuery('');
+  };
+
+  const handleNavigateUp = () => {
+      if (!currentPath) return; // Already at top
+      const segments = currentPath.split('/');
+      segments.pop(); // Remove last folder
+      const newPath = segments.join('/');
+      // If newPath becomes just empty or doesn't start with root (shouldn't happen logically but for safety), reset
+      setCurrentPath(newPath);
+  };
+
+  const handleFolderClick = (folderPath: string) => {
+      setCurrentPath(folderPath);
+      setSearchQuery('');
   };
 
   const copyToClipboard = (text: string, e: React.MouseEvent) => {
@@ -166,30 +61,115 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
     });
   };
 
+  // --- Filtering Logic ---
+  const displayItems = useMemo(() => {
+      if (!activeRoot) return [];
+
+      // A. SEARCH MODE (Scoped to Active Root)
+      if (searchQuery.trim()) {
+          const lowerQuery = searchQuery.toLowerCase();
+          return tracks
+              .filter(t => t.path.startsWith(activeRoot)) // Only search in current tab
+              .filter(t => 
+                  t.filename.toLowerCase().includes(lowerQuery) ||
+                  t.metadata.title.toLowerCase().includes(lowerQuery) ||
+                  t.metadata.performer.toLowerCase().includes(lowerQuery) ||
+                  t.path.toLowerCase().includes(lowerQuery)
+              )
+              .map(t => ({
+                  type: 'track' as const,
+                  data: t,
+                  key: t.id
+              }));
+      }
+
+      // B. BROWSE MODE
+      
+      // Determine what to show based on currentPath (or activeRoot if path empty)
+      const targetPath = currentPath || activeRoot;
+      const depth = targetPath.split('/').length;
+
+      // 1. Get all tracks that belong to this tree
+      const relevantTracks = tracks.filter(t => t.path.startsWith(targetPath));
+      
+      const foldersMap = new Set<string>();
+      const filesList: any[] = [];
+
+      relevantTracks.forEach(t => {
+          // If exact match path, it's a file in this folder
+          if (t.path === targetPath) {
+              filesList.push({
+                  type: 'track' as const,
+                  data: t,
+                  key: t.id
+              });
+          } else {
+              // It's in a subfolder
+              // targetPath: "Música 1"
+              // t.path: "Música 1/Salsa/Van Van"
+              // relative: "/Salsa/Van Van" -> parts: ["", "Salsa", "Van Van"]
+              // We want "Salsa"
+              const remainder = t.path.substring(targetPath.length);
+              // Ensure we strip leading slash
+              const cleanRemainder = remainder.startsWith('/') ? remainder.substring(1) : remainder;
+              const nextSegment = cleanRemainder.split('/')[0];
+              
+              if (nextSegment) {
+                  // Construct full path for the folder
+                  const fullFolderPath = targetPath === '' ? nextSegment : `${targetPath}/${nextSegment}`;
+                  foldersMap.add(fullFolderPath);
+              }
+          }
+      });
+
+      const foldersList = Array.from(foldersMap).sort().map(fPath => ({
+          type: 'folder' as const,
+          name: fPath.split('/').pop() || 'Carpeta',
+          fullPath: fPath,
+          key: fPath
+      }));
+
+      return [...foldersList, ...filesList];
+
+  }, [tracks, activeRoot, currentPath, searchQuery]);
+
+
   return (
     <div className="flex flex-col h-full bg-background-light dark:bg-background-dark">
       {/* Search Header */}
       <div className="px-4 py-4 bg-white dark:bg-background-dark shadow-sm border-b border-gray-200 dark:border-gray-800 sticky top-0 z-10">
         <div className="flex flex-col gap-3">
-          {/* Top Options Bar */}
-          <div className="flex w-full bg-gray-100 dark:bg-gray-800 p-1 rounded-xl overflow-x-auto no-scrollbar">
-             <button onClick={() => handleFilterChange('folder')} className={`flex-1 min-w-[70px] py-1.5 text-[10px] sm:text-xs font-bold rounded-lg transition-all ${activeFilter === 'folder' ? 'bg-white dark:bg-gray-700 text-primary shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}>Carpetas</button>
-             <button onClick={() => handleFilterChange('title')} className={`flex-1 min-w-[70px] py-1.5 text-[10px] sm:text-xs font-bold rounded-lg transition-all ${activeFilter === 'title' ? 'bg-white dark:bg-gray-700 text-primary shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}>Títulos</button>
-             <button onClick={() => handleFilterChange('author')} className={`flex-1 min-w-[70px] py-1.5 text-[10px] sm:text-xs font-bold rounded-lg transition-all ${activeFilter === 'author' ? 'bg-white dark:bg-gray-700 text-primary shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}>Autores</button>
-             <button onClick={() => handleFilterChange('performer')} className={`flex-1 min-w-[70px] py-1.5 text-[10px] sm:text-xs font-bold rounded-lg transition-all ${activeFilter === 'performer' ? 'bg-white dark:bg-gray-700 text-primary shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}>Intérpretes</button>
+          
+          {/* ROOT TABS (Música 1, Música 2...) */}
+          <div className="flex w-full bg-gray-100 dark:bg-gray-800 p-1 rounded-xl overflow-x-auto no-scrollbar gap-1">
+             {roots.length === 0 ? (
+                 <span className="text-xs text-gray-400 p-2">Sin datos cargados</span>
+             ) : (
+                 roots.map(root => (
+                    <button 
+                        key={root}
+                        onClick={() => handleRootChange(root)} 
+                        className={`flex-shrink-0 px-4 py-2 text-[10px] sm:text-xs font-bold rounded-lg transition-all whitespace-nowrap ${activeRoot === root ? 'bg-white dark:bg-gray-700 text-primary shadow-sm ring-1 ring-black/5' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'}`}
+                    >
+                        {root}
+                    </button>
+                 ))
+             )}
           </div>
 
           <div className="flex gap-2 items-center">
-            {activeFilter === 'folder' && currentFolder && !searchQuery && (
+            {/* Back Button */}
+            {currentPath && currentPath !== activeRoot && !searchQuery && (
                 <button 
-                    onClick={() => setCurrentFolder(null)}
-                    className="size-12 flex items-center justify-center bg-gray-100 dark:bg-gray-800 rounded-xl text-primary hover:bg-gray-200"
-                    title="Volver a Carpetas"
+                    onClick={handleNavigateUp}
+                    className="size-12 flex items-center justify-center bg-gray-100 dark:bg-gray-800 rounded-xl text-primary hover:bg-gray-200 transition-colors shrink-0"
+                    title="Subir nivel"
                 >
-                    <span className="material-symbols-outlined">arrow_back</span>
+                    <span className="material-symbols-outlined">arrow_upward</span>
                 </button>
             )}
             
+            {/* Search Bar */}
             <label className="flex-1 flex flex-col relative">
                 <div className="flex w-full items-stretch rounded-xl h-12 overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 transition-all focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/30">
                 <div className="text-gray-400 flex items-center justify-center pl-4">
@@ -197,13 +177,14 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
                 </div>
                 <input 
                     className="flex w-full border-none bg-transparent text-gray-900 dark:text-white focus:ring-0 placeholder:text-gray-400 px-3 text-base font-normal leading-normal" 
-                    placeholder={currentFolder && !searchQuery ? `Explorando: ${currentFolder}` : "Buscar general..."}
+                    placeholder={activeRoot ? `Buscar en ${activeRoot}...` : "Selecciona una categoría"}
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
+                    disabled={!activeRoot}
                 />
                 {searchQuery && (
                     <button 
-                        onClick={handleClearSearch}
+                        onClick={() => setSearchQuery('')}
                         className="pr-4 text-gray-400 hover:text-gray-600 flex items-center"
                     >
                         <span className="material-symbols-outlined text-lg">close</span>
@@ -212,51 +193,68 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack }) => {
                 </div>
             </label>
           </div>
+
+          {/* Breadcrumbs (Current Path Display) */}
+          {!searchQuery && currentPath && (
+              <div className="text-[10px] text-gray-500 font-mono truncate px-1 flex items-center gap-1">
+                  <span className="material-symbols-outlined text-xs">folder_open</span>
+                  {currentPath.replace(/\//g, ' / ')}
+              </div>
+          )}
         </div>
       </div>
 
-      {/* List */}
+      {/* List Content */}
       <div className="flex-1 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-800 pb-24">
-        {listItems.length === 0 ? (
+        {displayItems.length === 0 ? (
            <div className="flex flex-col items-center justify-center py-20 text-gray-400">
-             <span className="material-symbols-outlined text-4xl mb-2">sentiment_dissatisfied</span>
-             <p>No se encontraron resultados</p>
+             <span className="material-symbols-outlined text-4xl mb-2">folder_off</span>
+             <p className="text-sm">Carpeta vacía o sin resultados</p>
            </div>
         ) : (
-          listItems.map(item => (
+          displayItems.map(item => (
             <div 
-              key={item.id} 
-              onClick={() => handleItemClick(item)}
-              className="group flex items-center gap-4 bg-white dark:bg-background-dark px-4 py-4 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer active:scale-[0.99]"
+              key={item.key} 
+              onClick={() => item.type === 'folder' ? handleFolderClick(item.fullPath) : onSelectTrack(item.data)}
+              className="group flex items-center gap-4 bg-white dark:bg-background-dark px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer active:scale-[0.99]"
             >
-              <div className={`flex items-center justify-center rounded-xl shrink-0 size-12 border ${item.type === 'track' ? 'bg-primary/10 border-primary/20 text-primary' : 'bg-miel/10 border-miel/20 text-miel'}`}>
-                <span className="material-symbols-outlined">
-                    {item.type === 'folder' ? 'folder' : (activeFilter === 'author' ? 'person_edit' : (activeFilter === 'performer' ? 'mic_external_on' : 'music_note'))}
+              {/* Icon */}
+              <div className={`flex items-center justify-center rounded-xl shrink-0 size-10 border ${item.type === 'track' ? 'bg-primary/5 border-primary/10 text-primary' : 'bg-miel/10 border-miel/20 text-miel'}`}>
+                <span className="material-symbols-outlined text-xl">
+                    {item.type === 'folder' ? 'folder' : 'music_note'}
                 </span>
               </div>
+
+              {/* Text */}
               <div className="flex flex-col flex-1 min-w-0">
-                <p className="text-gray-900 dark:text-gray-100 text-base font-bold leading-tight truncate">
-                  {item.mainText}
+                <p className="text-gray-900 dark:text-gray-100 text-sm font-bold leading-tight truncate">
+                  {item.type === 'folder' ? item.name : (item.data.metadata.title || item.data.filename)}
                 </p>
-                <p className="text-gray-500 dark:text-gray-400 text-xs mt-1 truncate" title={item.subText}>
-                    {item.subText}
-                </p>
+                {item.type === 'track' && (
+                    <p className="text-gray-500 dark:text-gray-400 text-[10px] mt-0.5 truncate">
+                        {item.data.metadata.performer || "Artista desconocido"}
+                    </p>
+                )}
+                {/* Show path context if searching */}
+                {searchQuery && item.type === 'track' && (
+                    <p className="text-gray-400 text-[9px] mt-0.5 truncate">
+                        {item.data.path}
+                    </p>
+                )}
               </div>
               
-              <div className="shrink-0 flex items-center gap-2">
-                 {/* Copy Path Button */}
-                 {item.type === 'track' && item.path && (
+              {/* Actions */}
+              <div className="shrink-0 flex items-center gap-1">
+                 {item.type === 'track' && item.data.path && (
                      <button 
-                        onClick={(e) => copyToClipboard(item.path, e)}
-                        className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 hover:text-azul-cauto transition-colors"
-                        title="Copiar ruta"
+                        onClick={(e) => copyToClipboard(item.data.path, e)}
+                        className="p-2 rounded-full text-gray-300 hover:text-azul-cauto transition-colors"
                      >
-                        <span className="material-symbols-outlined text-lg">content_copy</span>
+                        <span className="material-symbols-outlined text-base">content_copy</span>
                      </button>
                  )}
-                 
-                 <span className="material-symbols-outlined text-gray-300 dark:text-gray-600">
-                     {item.type === 'folder' ? 'chevron_right' : 'visibility'}
+                 <span className="material-symbols-outlined text-gray-300 dark:text-gray-600 text-lg">
+                     {item.type === 'folder' ? 'chevron_right' : 'play_arrow'}
                  </span>
               </div>
             </div>

@@ -11,16 +11,6 @@ interface SettingsProps {
 const Settings: React.FC<SettingsProps> = ({ tracks, onImportFolders, onImportCredits }) => {
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const handleDownloadJson = () => {
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(tracks, null, 2));
-    const downloadAnchorNode = document.createElement('a');
-    downloadAnchorNode.setAttribute("href", dataStr);
-    downloadAnchorNode.setAttribute("download", "datosm.json");
-    document.body.appendChild(downloadAnchorNode);
-    downloadAnchorNode.click();
-    downloadAnchorNode.remove();
-  };
-
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, type: 'folders' | 'credits') => {
     if (e.target.files && e.target.files[0]) {
         setIsProcessing(true);
@@ -49,7 +39,7 @@ const Settings: React.FC<SettingsProps> = ({ tracks, onImportFolders, onImportCr
             <div className="bg-white dark:bg-white/5 p-6 rounded-xl border border-gray-200 dark:border-white/10 shadow-sm">
                 <div className="flex items-center gap-3 mb-4 text-azul-header dark:text-blue-400">
                     <span className="material-symbols-outlined">folder_managed</span>
-                    <h3 className="font-bold">Importar Base de Datos</h3>
+                    <h3 className="font-bold">Importar Base de Datos Local</h3>
                 </div>
                 <p className="text-sm text-gray-500 mb-4">
                     Soporta Excel (.xlsx) y Texto (.txt) con los formatos:<br/>
@@ -69,19 +59,11 @@ const Settings: React.FC<SettingsProps> = ({ tracks, onImportFolders, onImportCr
                     />
                 </label>
             </div>
-
-            <div className="bg-white dark:bg-white/5 p-6 rounded-xl border border-gray-200 dark:border-white/10 shadow-sm">
-                <div className="flex items-center gap-3 mb-4 text-green-600">
-                    <span className="material-symbols-outlined">data_object</span>
-                    <h3 className="font-bold">Exportar JSON</h3>
-                </div>
-                <button 
-                    onClick={handleDownloadJson}
-                    className="w-full py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold shadow-md flex items-center justify-center gap-2"
-                >
-                    <span className="material-symbols-outlined">download</span>
-                    Descargar datosm.json
-                </button>
+            
+            <div className="text-center p-4">
+                <p className="text-xs text-gray-400">
+                    Nota: La actualización principal se realiza vía GitHub desde la pantalla de inicio.
+                </p>
             </div>
         </div>
     </div>

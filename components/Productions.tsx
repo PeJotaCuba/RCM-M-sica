@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { Track, PROGRAMS_LIST } from '../types';
 import { parseTxtDatabase } from '../constants';
 import * as docx from 'docx';
+import * as XLSX from 'xlsx';
 
 interface ProductionsProps {
   onAddTracks: (tracks: Track[]) => void;
@@ -72,55 +73,87 @@ const Productions: React.FC<ProductionsProps> = ({ onAddTracks, allTracks = [] }
       alert("Pistas enviadas a la base de datos.");
   };
 
-  const generateReport = async () => {
-      // Logic to filter tracks by Date Range and Scope
+  const getFilteredTracks = () => {
       const start = new Date(reportStartDate);
       const end = new Date(reportEndDate);
-      end.setHours(23, 59, 59); // Include full end day
+      end.setHours(23, 59, 59);
 
-      const reportTracks = allTracks.filter(t => {
-          // Check if it is a production track (starts with "Producción:")
+      return allTracks.filter(t => {
           if (!t.metadata.album || !t.metadata.album.startsWith("Producción:")) return false;
 
-          // Extract date from album string: "Producción: Program Name (YYYY-MM-DD)"
           const match = t.metadata.album.match(/\(([\d-]+)\)$/);
           if (!match) return false;
 
           const trackDate = new Date(match[1]);
-          if (isNaN(trackDate.getTime())) return false; // Invalid date
+          if (isNaN(trackDate.getTime())) return false;
 
-          // Date Check
           const inRange = trackDate >= start && trackDate <= end;
           if (!inRange) return false;
 
-          // Scope Check
           if (reportScope === 'program') {
-              // Check if album string contains the selected program name
-              // Since format is "Producción: PROGRAM NAME (Date)"
-              // We can check if it starts with "Producción: PROGRAM NAME"
               return t.metadata.album.includes(`Producción: ${reportProgram}`);
           }
-
-          // General Scope includes all programs in date range
           return true;
       });
+  };
+
+  const exportToCSV = () => {
+      const reportTracks = getFilteredTracks();
+      if (reportTracks.length === 0) {
+          alert("No hay datos de producciones para exportar en este periodo.");
+          return;
+      }
+
+      // Preparar datos para CSV
+      const dataForCsv = reportTracks.map(t => {
+          // Extraer fecha y programa del string "Producción: PROGRAMA (FECHA)"
+          let fecha = "";
+          let programa = "";
+          const match = t.metadata.album.match(/Producción: (.*) \(([\d-]+)\)$/);
+          if (match) {
+              programa = match[1];
+              fecha = match[2];
+          }
+
+          return {
+              "Fecha": fecha,
+              "Programa": programa,
+              "Título": t.metadata.title,
+              "Autor": t.metadata.author,
+              "País Autor": t.metadata.authorCountry,
+              "Intérprete": t.metadata.performer,
+              "País Intérprete": t.metadata.performerCountry,
+              "Género": t.metadata.genre,
+              "Año": t.metadata.year
+          };
+      });
+
+      const worksheet = XLSX.utils.json_to_sheet(dataForCsv);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Producciones");
       
+      const fileName = reportScope === 'program' 
+          ? `Producciones_${reportProgram.replace(/\s/g, '_')}_${reportStartDate}_${reportEndDate}.csv`
+          : `Producciones_General_${reportStartDate}_${reportEndDate}.csv`;
+
+      XLSX.writeFile(workbook, fileName);
+  };
+
+  const generateReport = async () => {
+      const reportTracks = getFilteredTracks();
       if (reportTracks.length === 0) {
           alert("No hay datos guardados para este periodo y criterios.");
           return;
       }
 
-      // Calculate Stats
       const totalWorks = reportTracks.length;
       
-      // Zone Stats
       const cubaCount = reportTracks.filter(t => 
           (t.metadata.authorCountry && t.metadata.authorCountry.toLowerCase().includes('cuba')) || 
           (t.metadata.performerCountry && t.metadata.performerCountry.toLowerCase().includes('cuba'))
       ).length;
       const foreignCount = totalWorks - cubaCount;
 
-      // Top Counts
       const getTop = (key: 'title' | 'author' | 'performer' | 'genre', limit = 5) => {
           const counts: Record<string, number> = {};
           reportTracks.forEach(t => {
@@ -139,7 +172,6 @@ const Productions: React.FC<ProductionsProps> = ({ onAddTracks, allTracks = [] }
           ? `Programa: ${reportProgram}` 
           : "Reporte General (Todos los Programas)";
 
-      // Create Document
       const doc = new docx.Document({
           sections: [{
               properties: {},
@@ -163,7 +195,6 @@ const Productions: React.FC<ProductionsProps> = ({ onAddTracks, allTracks = [] }
                       spacing: { after: 200 }
                   }),
 
-                  // Table 1: Zonas
                   new docx.Paragraph({ text: "Obras, autores e intérpretes por zonas geográficas", bold: true }),
                   new docx.Table({
                       width: { size: 100, type: docx.WidthType.PERCENTAGE },
@@ -196,7 +227,6 @@ const Productions: React.FC<ProductionsProps> = ({ onAddTracks, allTracks = [] }
                   }),
                   new docx.Paragraph({ text: "" }), 
 
-                  // Table 2: Most Diffused Works
                   new docx.Paragraph({ text: "Obras musicales más difundidas", bold: true, spacing: { before: 200 } }),
                   new docx.Table({
                        width: { size: 100, type: docx.WidthType.PERCENTAGE },
@@ -214,7 +244,6 @@ const Productions: React.FC<ProductionsProps> = ({ onAddTracks, allTracks = [] }
                   }),
                   new docx.Paragraph({ text: "" }),
 
-                   // Table 3: Authors
                   new docx.Paragraph({ text: "Autores más difundidos", bold: true, spacing: { before: 200 } }),
                   new docx.Table({
                        width: { size: 100, type: docx.WidthType.PERCENTAGE },
@@ -232,7 +261,6 @@ const Productions: React.FC<ProductionsProps> = ({ onAddTracks, allTracks = [] }
                   }),
                   new docx.Paragraph({ text: "" }),
 
-                  // Table 4: Genres
                   new docx.Paragraph({ text: "Géneros más difundidos", bold: true, spacing: { before: 200 } }),
                    new docx.Table({
                        width: { size: 100, type: docx.WidthType.PERCENTAGE },
@@ -334,18 +362,18 @@ const Productions: React.FC<ProductionsProps> = ({ onAddTracks, allTracks = [] }
 
         <hr className="border-gray-200 dark:border-gray-700 mb-8"/>
 
-        {/* SECTION 2: REPORTS */}
+        {/* SECTION 2: REPORTS & EXPORTS */}
         <div>
             <div className="flex items-center gap-3 mb-6 text-green-700 dark:text-green-500">
                 <span className="material-symbols-outlined text-3xl">summarize</span>
-                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Generar Informes</h2>
+                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Informes y Base de Datos</h2>
             </div>
 
             <div className="bg-white dark:bg-zinc-800 p-6 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm space-y-4">
                 
                 {/* Periodo */}
                 <div>
-                    <label className="block text-xs font-bold text-gray-500 mb-2 uppercase tracking-wider">Periodo del Informe</label>
+                    <label className="block text-xs font-bold text-gray-500 mb-2 uppercase tracking-wider">Periodo</label>
                     <div className="grid grid-cols-2 gap-4">
                          <div>
                             <span className="text-[10px] text-gray-400">Desde</span>
@@ -360,7 +388,7 @@ const Productions: React.FC<ProductionsProps> = ({ onAddTracks, allTracks = [] }
 
                 {/* Scope Selection */}
                 <div>
-                    <label className="block text-xs font-bold text-gray-500 mb-2 uppercase tracking-wider">Tipo de Informe</label>
+                    <label className="block text-xs font-bold text-gray-500 mb-2 uppercase tracking-wider">Alcance</label>
                     <div className="flex gap-4">
                         <label className="flex items-center gap-2 cursor-pointer">
                             <input 
@@ -401,13 +429,24 @@ const Productions: React.FC<ProductionsProps> = ({ onAddTracks, allTracks = [] }
                     </div>
                 )}
 
-                <button 
-                    onClick={generateReport}
-                    className="w-full bg-green-600 text-white py-3 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 hover:bg-green-700 transition-colors mt-4"
-                >
-                    <span className="material-symbols-outlined">description</span>
-                    Descargar DOCX
-                </button>
+                <div className="flex gap-3 mt-4">
+                    <button 
+                        onClick={generateReport}
+                        className="flex-1 bg-azul-header text-white py-3 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 hover:bg-opacity-90 transition-colors"
+                        title="Generar reporte estadístico en Word"
+                    >
+                        <span className="material-symbols-outlined">description</span>
+                        Reporte (DOCX)
+                    </button>
+                    <button 
+                        onClick={exportToCSV}
+                        className="flex-1 bg-green-600 text-white py-3 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 hover:bg-green-700 transition-colors"
+                        title="Exportar base de datos de producción a CSV (Excel)"
+                    >
+                        <span className="material-symbols-outlined">csv</span>
+                        Base Datos (CSV)
+                    </button>
+                </div>
             </div>
         </div>
 
