@@ -2,62 +2,85 @@
 import { Track } from "./types";
 
 /**
- * Parsea el contenido de los TXT y asigna la ruta basándose en el "rootContext" (Música 1, Música 2...).
- * Formato esperado en TXT:
- * Archivo #...
- * Titulo: ...
- * Compositor: ... (o Autor)
- * Interprete: ...
- * Carpeta: ...
- * Ruta: ...
+ * Parsea el contenido de los TXT.
+ * Limpieza inteligente de rutas:
+ * 1. Elimina IPs y recursos compartidos (\\10.12.5.2\Musica1\...)
+ * 2. Elimina el nombre del archivo si aparece en la ruta.
+ * 3. Prepone el contexto de la pestaña (Música X).
  */
 export const parseTxtDatabase = (text: string, rootContext: string = 'Importado'): Track[] => {
   const tracks: Track[] = [];
-  // Normalizar saltos de línea
   const normalizedText = text.replace(/\r\n/g, '\n');
   const lines = normalizedText.split('\n');
   
   let currentTitle = "";
   let currentAuthor = "";
   let currentPerformer = "";
-  let currentAlbum = ""; // Mapped from "Carpeta"
-  let currentOriginalPath = ""; // Mapped from "Ruta"
+  let currentAlbum = ""; // Carpeta
+  let currentOriginalPath = ""; // Ruta
   
   const saveTrack = () => {
       if (currentTitle) {
           const cleanTitle = currentTitle.trim();
           
-          // Lógica de Ruta:
-          // 1. Tomamos "Ruta" del TXT o "Carpeta" si Ruta no existe.
-          // 2. Limpiamos letras de unidad (D:\...)
-          // 3. Preponemos el rootContext (Ej: "Música 1")
+          // --- LOGICA DE LIMPIEZA DE RUTA ---
+          let rawPath = currentOriginalPath || currentAlbum || 'Desconocido';
           
-          let rawPathSegment = currentOriginalPath || currentAlbum || 'Desconocido';
+          // 1. Normalizar barras
+          let cleanSegment = rawPath.replace(/\\/g, '/'); 
           
-          // Limpieza básica de la ruta original del TXT
-          let cleanSegment = rawPathSegment.replace(/\\/g, '/'); // Backslash a Slash
-          cleanSegment = cleanSegment.replace(/^[a-zA-Z]:/, ''); // Quitar C: D:
-          cleanSegment = cleanSegment.replace(/\/+$/, '').replace(/^\/+/, ''); // Trim slashes
+          // 2. Eliminar letras de unidad (C:, D:)
+          cleanSegment = cleanSegment.replace(/^[a-zA-Z]:/, '');
           
-          // Si la ruta original ya incluye el rootContext, tratamos de no duplicarlo, 
-          // pero asumiremos que el usuario carga en la pestaña correcta.
-          // Forzamos la estructura: Música X / Ruta del Txt
+          // 3. Eliminar IPs o rutas de red (ej: //10.12.5.2/Musica1/...)
+          // Busca patrón //IP/Share/ y lo quita, o simplemente el inicio de red
+          cleanSegment = cleanSegment.replace(/^\/+\d+\.\d+\.\d+\.\d+(\/[^\/]+)?/, '');
+          
+          // 4. Eliminar el propio nombre de la "Raíz" si viene en el TXT (ej: eliminar "Musica1" si ya estamos en tab Música 1)
+          // Esto ayuda a que empiece por "Cubana I" directamente.
+          const rootSimple = rootContext.replace(/\s/g, '').toLowerCase(); // musica1
+          const segmentLower = cleanSegment.toLowerCase();
+          
+          // Si la ruta empieza con /musica1/ o musica1/, lo quitamos
+          // Intentamos ser flexibles con "Música 1", "Musica1", etc.
+          const parts = cleanSegment.split('/').filter(p => p.trim() !== '');
+          
+          if (parts.length > 0) {
+             const firstPart = parts[0].toLowerCase().replace(/\s/g, ''); // musica1
+             // Comparar difuso (ignorar acentos básicos si es necesario, pero simple replace basta para este caso)
+             if (firstPart.includes("musica") || firstPart === rootSimple) {
+                 parts.shift(); // Quitamos el primer segmento (la carpeta raíz de red)
+             }
+          }
+          
+          // 5. Verificar si el último segmento es el mismo nombre del archivo .mp3 y quitarlo
+          // A veces la ruta en el TXT incluye el archivo.
+          if (parts.length > 0) {
+              const lastPart = parts[parts.length - 1];
+              if (lastPart.toLowerCase().endsWith('.mp3') || lastPart.toLowerCase() === cleanTitle.toLowerCase() + '.mp3') {
+                  parts.pop();
+              }
+          }
+
+          cleanSegment = parts.join('/');
+          
+          // 6. Construir ruta final: Música X / Resto
           const finalPath = `${rootContext}/${cleanSegment}`;
 
           tracks.push({
               id: `track-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
               filename: `${cleanTitle}.mp3`,
-              path: finalPath,
+              path: finalPath, // Esto es SOLO la carpeta, sin el archivo
               size: '---',
               isVerified: true,
               metadata: {
                   title: cleanTitle,
                   author: currentAuthor || "Desconocido",
-                  authorCountry: "", // El formato TXT dado no especifica país explícito, se deja vacío
+                  authorCountry: "", 
                   performer: currentPerformer || "Desconocido",
                   performerCountry: "",
-                  album: currentAlbum || "Desconocido",
-                  year: "", // El formato dado no tiene año
+                  album: currentAlbum || cleanSegment || "Desconocido", // Usar el segmento limpio como álbum si no hay dato
+                  year: "", 
                   genre: ""
               }
           });
@@ -76,9 +99,7 @@ export const parseTxtDatabase = (text: string, rootContext: string = 'Importado'
       
       const lowerLine = line.toLowerCase();
 
-      // Detección de nuevo bloque (Archivo #)
       if (lowerLine.startsWith('archivo #') || lowerLine.startsWith('archivo n')) {
-          // Si ya teníamos datos acumulados, guardamos el anterior
           if (currentTitle) saveTrack();
           continue;
       }
@@ -100,7 +121,6 @@ export const parseTxtDatabase = (text: string, rootContext: string = 'Importado'
       }
   }
 
-  // Guardar el último track si quedó pendiente
   if (currentTitle) saveTrack(); 
 
   return tracks;

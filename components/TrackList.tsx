@@ -51,13 +51,6 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
       setSearchQuery('');
   };
 
-  const copyToClipboard = (text: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    navigator.clipboard.writeText(text).then(() => {
-        alert("Ruta copiada al portapapeles");
-    });
-  };
-
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       if (e.target.files && e.target.files[0]) {
           onUploadTxt(e.target.files[0], activeRoot);
@@ -111,6 +104,7 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
       // Filter tracks that belong to the Active Root
       const rootTracks = tracks.filter(t => {
           if (!t.path) return false;
+          // Normalized comparison
           return t.path.toLowerCase().startsWith(activeRoot.toLowerCase());
       });
 
@@ -120,11 +114,12 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
       const filesList: any[] = [];
 
       rootTracks.forEach(t => {
-          const trackPath = t.path; 
+          const trackPath = t.path; // Clean Path (Folder structure only)
           
+          // Only look at tracks inside current targetPath
           if (!trackPath.startsWith(targetPath)) return;
 
-          // Check if it's a direct file in this folder
+          // If trackPath is EXACTLY targetPath, the file is right here.
           if (trackPath === targetPath || trackPath === targetPath + '/') {
               filesList.push({
                   type: 'track' as const,
@@ -132,7 +127,7 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
                   key: t.id
               });
           } else {
-              // Subfolder
+              // It's in a subfolder. Find the immediate next folder name.
               let relative = trackPath.substring(targetPath.length);
               if (relative.startsWith('/')) relative = relative.substring(1);
               

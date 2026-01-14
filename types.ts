@@ -19,6 +19,12 @@ export interface CreditInfo {
   genre?: string;
 }
 
+export interface User {
+  username: string;
+  password: string;
+  role: 'admin' | 'guest'; // 'guest' en código, 'Usuario' en UI
+}
+
 export enum ViewState {
   LOGIN = 'LOGIN',
   LIST = 'LIST',
