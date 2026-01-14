@@ -10,21 +10,10 @@ import Settings from './components/Settings';
 import Productions from './components/Productions';
 import { fetchCreditsFromGemini } from './services/geminiService';
 import * as XLSX from 'xlsx';
+import JSZip from 'jszip';
 
 const DB_KEY = 'rcm_db_datosm';
 const AUTH_KEY = 'rcm_auth_session';
-
-// Lista de archivos a descargar de GitHub
-const GITHUB_FILES = [
-    'Cubana 1.txt',
-    'Cubana II.txt',
-    'Extranjera I.txt',
-    'Extranjera II.txt',
-    'Grammense I.txt',
-    'Grammense II.txt',
-    'Infantiles.txt',
-    'Recuerdo.txt'
-];
 
 const App: React.FC = () => {
   const [tracks, setTracks] = useState<Track[]>([]);
@@ -38,6 +27,7 @@ const App: React.FC = () => {
   // Search State
   const [foundCredits, setFoundCredits] = useState<CreditInfo | null>(null);
   const [isSearching, setIsSearching] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
 
   // Helper to save to local storage
   const updateTracks = (newTracks: Track[] | ((prev: Track[]) => Track[])) => {
@@ -50,23 +40,6 @@ const App: React.FC = () => {
           }
           return updated;
       });
-  };
-
-  // Function to fetch a single file content
-  const fetchSingleFile = async (filename: string) => {
-      const baseUrl = `https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/main/${encodeURIComponent(filename)}`;
-      const fallbackUrl = `https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/master/${encodeURIComponent(filename)}`;
-      
-      try {
-          let response = await fetch(`${baseUrl}?t=${Date.now()}`);
-          if (!response.ok) {
-              response = await fetch(`${fallbackUrl}?t=${Date.now()}`);
-          }
-          if (response.ok) return await response.text();
-      } catch (e) {
-          console.warn(`Error descargando ${filename}`, e);
-      }
-      return null;
   };
 
   // Initialize DB and Restore Session
@@ -112,39 +85,60 @@ const App: React.FC = () => {
 
   const handleUpdateDatabase = async () => {
       const confirmUpdate = window.confirm(
-          `¿Actualizar base de datos musical?\n\nSe descargarán los siguientes archivos:\n${GITHUB_FILES.join('\n')}\n\nEsto puede tardar unos segundos.`
+          `¿Actualizar base de datos musical?\n\nSe descargará y procesará el archivo 'Info.zip' desde GitHub.\n\nEsto puede tardar unos segundos dependiendo de su conexión.`
       );
       if (!confirmUpdate) return;
 
+      setIsUpdating(true);
       let totalTracks: Track[] = [];
       let filesProcessed = 0;
 
-      try {
-          // Descargar archivos en paralelo
-          const promises = GITHUB_FILES.map(file => fetchSingleFile(file));
-          const contents = await Promise.all(promises);
+      const zipUrl = 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/main/Info.zip';
+      const fallbackUrl = 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/master/Info.zip';
 
-          contents.forEach((content, index) => {
-              if (content) {
-                  const newTracks = parseTxtDatabase(content);
-                  // Añadir prefijo al ID para identificar origen si fuera necesario
-                  totalTracks = [...totalTracks, ...newTracks];
-                  filesProcessed++;
-                  console.log(`Procesado ${GITHUB_FILES[index]}: ${newTracks.length} temas`);
+      try {
+          // 1. Descargar el ZIP como ArrayBuffer
+          let response = await fetch(zipUrl);
+          if (!response.ok) {
+              console.log("Intentando URL alternativa...");
+              response = await fetch(fallbackUrl);
+          }
+          
+          if (!response.ok) throw new Error("No se pudo descargar Info.zip");
+
+          const blob = await response.arrayBuffer();
+
+          // 2. Abrir con JSZip
+          const zip = await JSZip.loadAsync(blob);
+          
+          // 3. Iterar archivos
+          const filePromises: Promise<void>[] = [];
+
+          zip.forEach((relativePath, zipEntry) => {
+              if (zipEntry.name.toLowerCase().endsWith('.txt') && !zipEntry.name.startsWith('__MACOSX')) {
+                  const promise = zipEntry.async('string').then(content => {
+                      const newTracks = parseTxtDatabase(content);
+                      totalTracks = [...totalTracks, ...newTracks];
+                      filesProcessed++;
+                  });
+                  filePromises.push(promise);
               }
           });
 
+          await Promise.all(filePromises);
+
           if (totalTracks.length > 0) {
-               // Reemplazamos la base de datos completamente para asegurar consistencia con GitHub
                updateTracks(totalTracks);
-               alert(`Actualización completada.\nSe procesaron ${filesProcessed} archivos.\nTotal de temas: ${totalTracks.length}.`);
+               alert(`Actualización completada con éxito.\nSe procesaron ${filesProcessed} archivos TXT dentro del ZIP.\nTotal de temas indexados: ${totalTracks.length}.`);
                window.location.reload(); 
           } else {
-              alert("No se encontraron temas en los archivos descargados o hubo un error de conexión.");
+              alert("El archivo ZIP se descargó pero no se encontraron datos válidos en los archivos de texto.");
           }
       } catch (error) {
           console.error("Update failed", error);
-          alert("Error crítico durante la actualización. Verifique su conexión.");
+          alert("Error durante la actualización. Verifique que 'Info.zip' existe en el repositorio y revise su conexión.");
+      } finally {
+          setIsUpdating(false);
       }
   };
 
@@ -205,8 +199,7 @@ const App: React.FC = () => {
 
   const handleImportFolders = async (file: File) => {
       if (!file) return;
-      // ... (Lógica de importación local mantenida para uso administrativo si es necesario)
-      alert("Para importar masivamente, use la opción de actualización desde GitHub en la pantalla de inicio.");
+      alert("Para importar masivamente, use la opción de actualización desde GitHub (ZIP) en la pantalla de inicio.");
   };
 
   const handleImportCredits = async (file: File) => {
@@ -218,7 +211,18 @@ const App: React.FC = () => {
   };
 
   if (view === ViewState.LOGIN) {
-      return <LoginScreen onLogin={handleLogin} onUpdate={handleUpdateDatabase} />;
+      return (
+        <>
+            {isUpdating && (
+                <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm text-white">
+                    <div className="size-16 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4"></div>
+                    <p className="font-bold text-lg animate-pulse">Descargando y procesando Info.zip...</p>
+                    <p className="text-sm text-gray-400 mt-2">Por favor espere</p>
+                </div>
+            )}
+            <LoginScreen onLogin={handleLogin} onUpdate={handleUpdateDatabase} />
+        </>
+      );
   }
 
   return (
@@ -239,8 +243,9 @@ const App: React.FC = () => {
                     <div className="flex items-center gap-3">
                         <button 
                             onClick={handleUpdateDatabase}
-                            className="text-white bg-white/10 hover:bg-white/20 p-2 rounded-full transition-colors flex items-center justify-center size-10"
-                            title="Sincronizar TXT desde GitHub"
+                            className={`text-white bg-white/10 hover:bg-white/20 p-2 rounded-full transition-colors flex items-center justify-center size-10 ${isUpdating ? 'animate-spin bg-white/30' : ''}`}
+                            title="Sincronizar Info.zip desde GitHub"
+                            disabled={isUpdating}
                         >
                             <span className="material-symbols-outlined text-xl">sync_alt</span>
                         </button>
