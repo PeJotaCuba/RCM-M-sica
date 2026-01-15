@@ -14,6 +14,7 @@ import * as XLSX from 'xlsx';
 
 const AUTH_KEY = 'rcm_auth_session';
 const USERS_KEY = 'rcm_users_db';
+const RECENT_TRACKS_KEY = 'rcm_recent_tracks';
 
 // CONFIGURACIÓN DE URLS DE GITHUB
 // Mapeo explícito para garantizar la conexión correcta a los archivos del repositorio
@@ -101,6 +102,7 @@ const App: React.FC = () => {
   useEffect(() => {
     const initApp = async () => {
         // 1. Load Tracks from IndexedDB (Async)
+        // Esto asegura que los datos persistan incluso si se cierra el navegador
         try {
             const dbTracks = await loadTracksFromDB();
             if (dbTracks.length > 0) {
@@ -123,7 +125,16 @@ const App: React.FC = () => {
         }
         setUsers(currentUsersList);
 
-        // 3. Restore Session
+        // 3. Load Recent Tracks (Persistence)
+        const localRecents = localStorage.getItem(RECENT_TRACKS_KEY);
+        if (localRecents) {
+            try {
+                const parsedRecents = JSON.parse(localRecents);
+                if (Array.isArray(parsedRecents)) setRecentTracks(parsedRecents);
+            } catch {}
+        }
+
+        // 4. Restore Session
         const savedUserStr = localStorage.getItem(AUTH_KEY);
         if (savedUserStr) {
             try {
@@ -153,12 +164,13 @@ const App: React.FC = () => {
   };
 
   const handleLogout = () => {
+      // Elimina solo la sesión, MANTIENE los datos cargados (tracks y recents)
       localStorage.removeItem(AUTH_KEY);
       setAuthMode(null);
       setCurrentUser(null);
       setView(ViewState.LOGIN);
       setSelectedTrack(null);
-      setRecentTracks([]);
+      // No limpiamos setRecentTracks([]) para que persistan en el dispositivo
   };
 
   // --- USER MANAGEMENT ---
@@ -276,7 +288,12 @@ const App: React.FC = () => {
 
   const handleSelectTrack = (track: Track) => {
     setSelectedTrack(track);
-    setRecentTracks(prev => [track, ...prev.filter(t => t.id !== track.id)].slice(0, 10));
+    setRecentTracks(prev => {
+        const updated = [track, ...prev.filter(t => t.id !== track.id)].slice(0, 10);
+        // Persistir Recientes
+        localStorage.setItem(RECENT_TRACKS_KEY, JSON.stringify(updated));
+        return updated;
+    });
   };
 
   const handleSearchCredits = async () => {
@@ -330,7 +347,7 @@ const App: React.FC = () => {
                 </div>
                 <div className="flex items-center gap-2">
                     {/* Saving Indicator */}
-                    {isSaving && <span className="size-2 bg-yellow-400 rounded-full animate-pulse" title="Guardando..."></span>}
+                    {isSaving && <span className="size-2 bg-yellow-400 rounded-full animate-pulse" title="Guardando en dispositivo..."></span>}
                     
                     <div className={`text-[10px] font-bold px-2 py-0.5 rounded shadow-sm uppercase ${authMode === 'admin' ? 'bg-miel text-white' : 'bg-green-600 text-white'}`}>
                         {authMode === 'admin' ? 'ADMIN' : 'USER'}
