@@ -212,7 +212,8 @@ const App: React.FC = () => {
   };
 
   const handleSyncMusicRoot = async (rootName: string) => {
-      if (authMode !== 'admin') return;
+      // Permitir a usuarios actualizar también
+      // if (authMode !== 'admin') return; 
 
       const url = DB_URLS[rootName];
       if (!url) {

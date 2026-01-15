@@ -270,17 +270,18 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
                         )}
                     </div>
                     
-                    {/* Admin Actions for current root */}
-                    {isAdmin && (
-                        <div className="flex gap-2">
-                            <button 
-                                onClick={() => onSyncRoot(activeRoot)}
-                                className="bg-green-600 text-white rounded px-2 py-1 text-[10px] font-bold uppercase flex items-center gap-1 hover:bg-green-700 transition-colors"
-                                title={`Actualizar ${activeRoot} desde GitHub`}
-                            >
-                                <span className="material-symbols-outlined text-xs">sync</span>
-                                Actualizar
-                            </button>
+                    {/* Actions for current root - Update visible to all, Export admin only */}
+                    <div className="flex gap-2">
+                        <button 
+                            onClick={() => onSyncRoot(activeRoot)}
+                            className="bg-green-600 text-white rounded px-2 py-1 text-[10px] font-bold uppercase flex items-center gap-1 hover:bg-green-700 transition-colors"
+                            title={`Actualizar ${activeRoot} desde GitHub`}
+                        >
+                            <span className="material-symbols-outlined text-xs">sync</span>
+                            Actualizar
+                        </button>
+                        
+                        {isAdmin && (
                             <button 
                                 onClick={() => onExportRoot(activeRoot)}
                                 className="bg-azul-header text-white rounded px-2 py-1 text-[10px] font-bold uppercase flex items-center gap-1 hover:bg-blue-900 transition-colors"
@@ -289,8 +290,8 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
                                 <span className="material-symbols-outlined text-xs">save</span>
                                 Guardar
                             </button>
-                        </div>
-                    )}
+                        )}
+                    </div>
 
                     {currentPath && currentPath !== activeRoot && (
                         <button 
