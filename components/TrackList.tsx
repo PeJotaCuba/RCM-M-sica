@@ -91,19 +91,34 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
   const displayItems = useMemo(() => {
       // --- GLOBAL SEARCH MODE ---
       if (searchQuery.trim()) {
-          const lowerQuery = searchQuery.toLowerCase();
+          // 1. Funciones de limpieza para la búsqueda
+          const normalize = (str: string) => str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+          const escapeRegExp = (string: string) => string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); 
+
+          const cleanQuery = normalize(searchQuery.trim());
+          
+          // 2. Crear Regex con \b (Word Boundary)
+          // \b asegura que la coincidencia empiece al inicio de una palabra.
+          // Ej: "Lov" encontrará "Lover" (empieza por Lov) pero NO "Llover" (la L anterior bloquea el match).
+          const queryRegex = new RegExp(`\\b${escapeRegExp(cleanQuery)}`, 'i');
           
           const matchingTracks: any[] = [];
           const matchingFolders = new Set<string>();
 
           // Optimized single-pass loop
           for (const t of tracks) {
-               // Track Matching
+               // Normalizar campos del track
+               const normFilename = normalize(t.filename);
+               const normTitle = normalize(t.metadata.title || "");
+               const normPerformer = normalize(t.metadata.performer || "");
+               const normPath = t.path ? normalize(t.path) : "";
+
+               // Track Matching usando Regex de frontera de palabra
                const matchesTrack = 
-                  t.filename.toLowerCase().includes(lowerQuery) ||
-                  t.metadata.title.toLowerCase().includes(lowerQuery) ||
-                  t.metadata.performer.toLowerCase().includes(lowerQuery) ||
-                  (t.path && t.path.toLowerCase().includes(lowerQuery));
+                  queryRegex.test(normFilename) ||
+                  queryRegex.test(normTitle) ||
+                  queryRegex.test(normPerformer) ||
+                  queryRegex.test(normPath);
 
                if (matchesTrack) {
                    matchingTracks.push({
@@ -113,13 +128,16 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
                    });
                }
 
-               // Folder Matching
+               // Folder Matching (Simplificado para carpetas: búsqueda simple de texto para no ser tan restrictivo con rutas)
+               // En rutas, a veces queremos encontrar "Pop" dentro de "Musica/Pop/Latino" aunque no sea inicio exacto de palabra si hay simbolos raros.
+               // Pero aplicamos la misma logica de normalización por consistencia visual.
                if (t.path) {
                   const segments = t.path.split('/');
                   let progressive = "";
                   for (const seg of segments) {
                       progressive = progressive ? `${progressive}/${seg}` : seg;
-                      if (seg.toLowerCase().includes(lowerQuery)) {
+                      const normSeg = normalize(seg);
+                      if (queryRegex.test(normSeg)) {
                           matchingFolders.add(progressive);
                       }
                   }
@@ -222,7 +240,7 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
                 </div>
                 <input 
                     className="flex w-full border-none bg-transparent text-gray-900 dark:text-white focus:ring-0 placeholder:text-gray-400 px-3 text-sm font-normal" 
-                    placeholder="Buscar en toda la base de datos..."
+                    placeholder="Buscar (Título, Artista, Palabra inicial...)"
                     value={inputValue}
                     onChange={(e) => setInputValue(e.target.value)}
                 />
