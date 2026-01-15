@@ -9,14 +9,23 @@ import LoginScreen from './components/LoginScreen';
 import Settings from './components/Settings';
 import Productions from './components/Productions';
 import { fetchCreditsFromGemini } from './services/geminiService';
-import { loadTracksFromDB, saveTracksToDB } from './services/db'; // Importamos el nuevo servicio
+import { loadTracksFromDB, saveTracksToDB } from './services/db'; 
 import * as XLSX from 'xlsx';
 
 const AUTH_KEY = 'rcm_auth_session';
 const USERS_KEY = 'rcm_users_db';
 
-// URL BASE DE GITHUB
-const GITHUB_BASE_URL = "https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/";
+// CONFIGURACIÓN DE URLS DE GITHUB
+// Mapeo explícito para garantizar la conexión correcta a los archivos del repositorio
+const DB_URLS: Record<string, string> = {
+    'Música 1': 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/mdatos1.json',
+    'Música 2': 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/mdatos2.json',
+    'Música 3': 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/mdatos3.json',
+    'Música 4': 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/mdatos4.json', 
+    'Música 5': 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/mdatos5.json'
+};
+
+const USERS_DB_URL = 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/musuarios.json';
 
 // Default admin if no users exist
 const DEFAULT_ADMIN: User = { 
@@ -97,7 +106,6 @@ const App: React.FC = () => {
             if (dbTracks.length > 0) {
                 setTracks(dbTracks);
             } else {
-                // Fallback: Check LocalStorage migration if needed, otherwise empty
                 console.log("Base de datos local vacía o inicial.");
             }
         } catch (e) {
@@ -166,18 +174,19 @@ const App: React.FC = () => {
   const handleSyncUsers = async () => {
       setIsUpdating(true);
       try {
-          const url = `${GITHUB_BASE_URL}musuarios.json`;
+          const url = USERS_DB_URL;
+          console.log("Sincronizando usuarios desde:", url);
           const response = await fetch(url);
           if (!response.ok) throw new Error(`HTTP: ${response.status}`);
           const jsonUsers = await response.json();
           if (Array.isArray(jsonUsers)) {
               updateUsers(jsonUsers);
-              alert("Usuarios actualizados correctamente.");
+              alert("Usuarios actualizados correctamente desde Github.");
               if (view === ViewState.LOGIN) window.location.reload();
           }
       } catch (e) {
           console.error(e);
-          alert("Error actualizando usuarios. Verifique conexión o repositorio.");
+          alert("Error actualizando usuarios. Verifique conexión o la URL del repositorio.");
       } finally {
           setIsUpdating(false);
       }
@@ -186,14 +195,17 @@ const App: React.FC = () => {
   const handleSyncMusicRoot = async (rootName: string) => {
       if (authMode !== 'admin') return;
 
-      const rootNumber = rootName.split(' ')[1];
-      const filename = `mdatos${rootNumber}.json`;
-      const url = `${GITHUB_BASE_URL}${filename}`;
+      const url = DB_URLS[rootName];
+      if (!url) {
+          alert(`No hay una URL configurada para ${rootName}`);
+          return;
+      }
 
       if (!window.confirm(`¿Reemplazar datos locales de "${rootName}" con la versión de GitHub?`)) return;
 
       setIsUpdating(true);
       try {
+          console.log(`Descargando datos para ${rootName} desde: ${url}`);
           const response = await fetch(url);
           if (!response.ok) throw new Error(`HTTP: ${response.status}`);
           
@@ -210,7 +222,7 @@ const App: React.FC = () => {
           
       } catch (e) {
           console.error(e);
-          alert(`Error al descargar ${filename}.\nVerifique que la URL: ${url} sea accesible.`);
+          alert(`Error al descargar datos de ${rootName}.\nVerifique que la URL: ${url} sea accesible y el archivo exista.`);
       } finally {
           setIsUpdating(false);
       }
@@ -267,7 +279,6 @@ const App: React.FC = () => {
     setRecentTracks(prev => [track, ...prev.filter(t => t.id !== track.id)].slice(0, 10));
   };
 
-  // ... (Rest of search/gemini logic remains same)
   const handleSearchCredits = async () => {
     if (!selectedTrack) return;
     setIsSearching(true);
