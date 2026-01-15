@@ -10,14 +10,13 @@ import Settings from './components/Settings';
 import Productions from './components/Productions';
 import { fetchCreditsFromGemini } from './services/geminiService';
 import * as XLSX from 'xlsx';
-import initSqlJs from 'sql.js';
 
 const DB_KEY = 'rcm_db_datosm';
 const AUTH_KEY = 'rcm_auth_session';
 const USERS_KEY = 'rcm_users_db';
 
-// REEMPLAZA ESTO CON TU URL REAL DE GITHUB (RAW)
-const GITHUB_DB_URL = "https://raw.githubusercontent.com/TU_USUARIO/TU_REPO/main/mdatos.db";
+// URL BASE DE GITHUB (Cambiar esto por tu usuario/repo real)
+const GITHUB_BASE_URL = "https://raw.githubusercontent.com/TU_USUARIO/TU_REPO/main/";
 
 // Default admin if no users exist
 const DEFAULT_ADMIN: User = { 
@@ -159,110 +158,103 @@ const App: React.FC = () => {
       updateUsers(users.filter(u => u.username !== username));
   };
 
-  // --- SYNC WITH GITHUB (SQLITE DB) ---
-  const handleUpdateDatabase = async () => {
-      if (authMode !== 'admin' && view !== ViewState.LOGIN) return;
+  // --- SYNC FUNCTIONS (SEGMENTED) ---
 
-      const confirmUpdate = window.confirm(
-          `¿Actualizar desde GitHub?\n\nSe buscará el archivo 'mdatos.db'.\nEsto reemplazará la base de datos local.`
-      );
-      if (!confirmUpdate) return;
-
+  // 1. Sync Users (Login Screen)
+  const handleSyncUsers = async () => {
       setIsUpdating(true);
-      
       try {
-          // 1. Descargar el archivo binario desde GitHub
-          console.log("Descargando mdatos.db desde:", GITHUB_DB_URL);
-          const response = await fetch(GITHUB_DB_URL);
+          const url = `${GITHUB_BASE_URL}musuarios.json`;
+          console.log("Descargando usuarios desde:", url);
           
+          const response = await fetch(url);
           if (!response.ok) throw new Error(`Error HTTP: ${response.status}`);
           
-          const arrayBuffer = await response.arrayBuffer();
-
-          // 2. Inicializar SQL.js
-          const SQL = await initSqlJs({
-            // Es necesario apuntar al archivo WASM correcto
-            locateFile: file => `https://sql.js.org/dist/${file}`
-          });
-
-          // 3. Cargar Base de Datos
-          const db = new SQL.Database(new Uint8Array(arrayBuffer));
-
-          // 4. Ejecutar consulta
-          // ASUMIMOS QUE LA TABLA SE LLAMA 'tracks'
-          // Ajusta esta consulta según la estructura real de tu .db
-          const stmt = db.prepare("SELECT * FROM tracks");
-          
-          const newTracks: Track[] = [];
-
-          while (stmt.step()) {
-              const row = stmt.getAsObject();
-              
-              // Mapeo flexible de columnas SQL -> Objeto Track
-              // Intenta leer columnas comunes (en inglés o español)
-              const title = (row.title || row.titulo || 'Sin Título') as string;
-              const author = (row.author || row.autor || 'Desconocido') as string;
-              const performer = (row.performer || row.interprete || row.artist || 'Desconocido') as string;
-              const album = (row.album || row.carpeta || row.folder || 'Desconocido') as string;
-              const path = (row.path || row.ruta || album) as string;
-              const filename = (row.filename || row.archivo || `${title}.mp3`) as string;
-              const year = (row.year || row.ano || row.anio || '') as string;
-              const genre = (row.genre || row.genero || '') as string;
-              const authorCountry = (row.authorCountry || row.pais_autor || '') as string;
-              const performerCountry = (row.performerCountry || row.pais_interprete || '') as string;
-
-              newTracks.push({
-                  id: `db-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-                  filename: filename,
-                  path: path,
-                  size: 'DB',
-                  isVerified: true,
-                  metadata: {
-                      title,
-                      author,
-                      authorCountry,
-                      performer,
-                      performerCountry,
-                      album,
-                      year: String(year),
-                      genre
-                  }
-              });
-          }
-
-          stmt.free();
-          db.close();
-
-          if (newTracks.length > 0) {
-              updateTracks(newTracks);
-              alert(`Sincronización Exitosa.\nSe han cargado ${newTracks.length} temas desde la base de datos SQLite.`);
-              
-              if (view === ViewState.LOGIN) {
-                  window.location.reload();
-              }
+          const jsonUsers = await response.json();
+          if (Array.isArray(jsonUsers)) {
+              updateUsers(jsonUsers);
+              alert("Usuarios actualizados correctamente desde Github.");
+              if (view === ViewState.LOGIN) window.location.reload();
           } else {
-              alert("La base de datos se descargó, pero la tabla 'tracks' parece estar vacía o no existe.");
+              throw new Error("Formato inválido en musuarios.json");
           }
-
-      } catch (error) {
-          console.error("Update failed", error);
-          alert("Error al sincronizar con GitHub.\n\nVerifique:\n1. Que la URL en el código sea correcta.\n2. Que el archivo 'mdatos.db' exista en el repo.\n3. Que el repo sea público.");
+      } catch (e) {
+          console.error(e);
+          alert("Error actualizando usuarios. Verifique que 'musuarios.json' exista en el repositorio.");
       } finally {
           setIsUpdating(false);
       }
   };
 
-  // --- EXPORT JSON ---
-  const handleExportDatabase = () => {
-      if (tracks.length === 0) {
-          alert("No hay datos para exportar.");
+  // 2. Sync Music Data per Root (Música 1, Música 2, etc.)
+  const handleSyncMusicRoot = async (rootName: string) => {
+      if (authMode !== 'admin') return;
+
+      // Map "Música 1" -> "mdatos1.json"
+      const rootNumber = rootName.split(' ')[1];
+      const filename = `mdatos${rootNumber}.json`;
+      const url = `${GITHUB_BASE_URL}${filename}`;
+
+      const confirmSync = window.confirm(`¿Reemplazar datos locales de "${rootName}" con la versión de GitHub (${filename})?`);
+      if (!confirmSync) return;
+
+      setIsUpdating(true);
+      try {
+          console.log(`Descargando ${filename}...`);
+          const response = await fetch(url);
+          if (!response.ok) throw new Error(`Error HTTP: ${response.status}`);
+          
+          const newTracks = await response.json();
+          if (!Array.isArray(newTracks)) throw new Error("Formato JSON inválido");
+
+          // Remove old tracks belonging to this root
+          // We assume "Música 1" tracks have paths starting with "Música 1"
+          const otherTracks = tracks.filter(t => !t.path.startsWith(rootName));
+          
+          // Merge
+          updateTracks([...otherTracks, ...newTracks]);
+          alert(`Sincronización de ${rootName} exitosa.\n${newTracks.length} temas cargados.`);
+          
+      } catch (e) {
+          console.error(e);
+          alert(`Error al descargar ${filename}.\nAsegúrese de que el archivo existe en GitHub y la URL es correcta.`);
+      } finally {
+          setIsUpdating(false);
+      }
+  };
+
+  // 3. Export Music Data per Root (For Admin to upload to GitHub later)
+  const handleExportMusicRoot = (rootName: string) => {
+      if (authMode !== 'admin') return;
+
+      // Filter tracks for this root
+      const rootTracks = tracks.filter(t => t.path.startsWith(rootName));
+      
+      if (rootTracks.length === 0) {
+          alert(`No hay temas en ${rootName} para exportar.`);
           return;
       }
-      
-      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(tracks, null, 2));
+
+      const rootNumber = rootName.split(' ')[1];
+      const filename = `mdatos${rootNumber}.json`;
+
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(rootTracks, null, 2));
       const downloadAnchorNode = document.createElement('a');
       downloadAnchorNode.setAttribute("href", dataStr);
-      downloadAnchorNode.setAttribute("download", "datosm.json");
+      downloadAnchorNode.setAttribute("download", filename);
+      document.body.appendChild(downloadAnchorNode);
+      downloadAnchorNode.click();
+      downloadAnchorNode.remove();
+  };
+
+  // 4. Export Users (Settings)
+  const handleExportUsers = () => {
+      if (authMode !== 'admin') return;
+      
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(users, null, 2));
+      const downloadAnchorNode = document.createElement('a');
+      downloadAnchorNode.setAttribute("href", dataStr);
+      downloadAnchorNode.setAttribute("download", "musuarios.json");
       document.body.appendChild(downloadAnchorNode);
       downloadAnchorNode.click();
       downloadAnchorNode.remove();
@@ -350,7 +342,7 @@ const App: React.FC = () => {
         <LoginScreen 
             onLoginSuccess={handleLoginSuccess} 
             users={users} 
-            onUpdate={handleUpdateDatabase}
+            onUpdateUsers={handleSyncUsers}
             isUpdating={isUpdating}
         />
       );
@@ -380,27 +372,6 @@ const App: React.FC = () => {
                         {authMode === 'admin' ? 'ADMINISTRADOR' : 'USUARIO'}
                     </div>
 
-                    {/* Botón Exportar JSON (Solo Admin) */}
-                    {authMode === 'admin' && view === ViewState.LIST && (
-                        <button 
-                            onClick={handleExportDatabase}
-                            className="text-white bg-white/10 hover:bg-green-500/50 p-2 rounded-full transition-colors flex items-center justify-center size-10"
-                            title="Generar datosm.json (Actualizar)"
-                        >
-                            <span className="material-symbols-outlined text-xl">save_alt</span>
-                        </button>
-                    )}
-                    
-                    {/* Botón Update ahora apunta a GitHub/SQLite */}
-                    <button 
-                        onClick={handleUpdateDatabase}
-                        className={`text-white bg-white/10 hover:bg-white/20 p-2 rounded-full transition-colors flex items-center justify-center size-10 ${isUpdating ? 'animate-spin bg-white/30' : ''}`}
-                        title="Sincronizar desde GitHub (mdatos.db)"
-                        disabled={isUpdating}
-                    >
-                        <span className="material-symbols-outlined text-xl">sync</span>
-                    </button>
-
                     <button 
                         onClick={handleLogout}
                         className="text-white bg-white/10 hover:bg-red-500/50 p-2 rounded-full transition-colors flex items-center justify-center size-10"
@@ -415,8 +386,7 @@ const App: React.FC = () => {
         {isUpdating && (
             <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm text-white">
                 <div className="size-16 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4"></div>
-                <p className="font-bold text-lg animate-pulse">Descargando DB...</p>
-                <p className="text-xs text-gray-400 mt-2">GitHub / mdatos.db</p>
+                <p className="font-bold text-lg animate-pulse">Sincronizando...</p>
             </div>
         )}
 
@@ -427,6 +397,8 @@ const App: React.FC = () => {
                     onSelectTrack={handleSelectTrack} 
                     onUploadTxt={handleUploadTxt}
                     isAdmin={authMode === 'admin'}
+                    onSyncRoot={handleSyncMusicRoot}
+                    onExportRoot={handleExportMusicRoot}
                 />
             )}
 
@@ -442,6 +414,8 @@ const App: React.FC = () => {
                             onSelectTrack={handleSelectTrack} 
                             onUploadTxt={() => {}} 
                             isAdmin={false}
+                            onSyncRoot={() => {}}
+                            onExportRoot={() => {}}
                         />
                     )}
                 </div>
@@ -454,6 +428,7 @@ const App: React.FC = () => {
                     onAddUser={handleAddUser}
                     onEditUser={handleEditUser}
                     onDeleteUser={handleDeleteUser}
+                    onExportUsers={handleExportUsers}
                 />
             )}
 

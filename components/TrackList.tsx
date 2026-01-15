@@ -7,11 +7,13 @@ interface TrackListProps {
   onSelectTrack: (track: Track) => void;
   onUploadTxt: (file: File, root: string) => void;
   isAdmin: boolean;
+  onSyncRoot: (root: string) => void;
+  onExportRoot: (root: string) => void;
 }
 
 const FIXED_ROOTS = ['Música 1', 'Música 2', 'Música 3', 'Música 4', 'Música 5'];
 
-const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTxt, isAdmin }) => {
+const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTxt, isAdmin, onSyncRoot, onExportRoot }) => {
   const [searchQuery, setSearchQuery] = useState('');
   
   // Navigation State
@@ -208,18 +210,42 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
             </label>
 
             {!searchQuery && (
-                <div className="flex items-center gap-2 text-gray-500 text-xs min-h-[20px]">
-                    <span className="material-symbols-outlined text-base text-miel">hard_drive</span>
-                    <span className="font-bold text-gray-700 dark:text-gray-300">{activeRoot}</span>
-                    {currentPath && currentPath !== activeRoot && (
-                        <>
-                            <span className="material-symbols-outlined text-sm text-gray-400">chevron_right</span>
-                            <span className="truncate font-mono text-gray-600 dark:text-gray-400">
-                                {currentPath.substring(activeRoot.length).replace(/^\//, '').replace(/\//g, ' / ')}
-                            </span>
-                        </>
-                    )}
+                <div className="flex flex-wrap items-center justify-between gap-2 text-gray-500 text-xs min-h-[20px]">
+                    <div className="flex items-center gap-2">
+                        <span className="material-symbols-outlined text-base text-miel">hard_drive</span>
+                        <span className="font-bold text-gray-700 dark:text-gray-300">{activeRoot}</span>
+                        {currentPath && currentPath !== activeRoot && (
+                            <>
+                                <span className="material-symbols-outlined text-sm text-gray-400">chevron_right</span>
+                                <span className="truncate font-mono text-gray-600 dark:text-gray-400 max-w-[120px]">
+                                    {currentPath.substring(activeRoot.length).replace(/^\//, '').replace(/\//g, ' / ')}
+                                </span>
+                            </>
+                        )}
+                    </div>
                     
+                    {/* Admin Actions for current root */}
+                    {isAdmin && (
+                        <div className="flex gap-2">
+                            <button 
+                                onClick={() => onSyncRoot(activeRoot)}
+                                className="bg-green-600 text-white rounded px-2 py-1 text-[10px] font-bold uppercase flex items-center gap-1 hover:bg-green-700 transition-colors"
+                                title={`Actualizar ${activeRoot} desde GitHub`}
+                            >
+                                <span className="material-symbols-outlined text-xs">sync</span>
+                                Actualizar
+                            </button>
+                            <button 
+                                onClick={() => onExportRoot(activeRoot)}
+                                className="bg-azul-header text-white rounded px-2 py-1 text-[10px] font-bold uppercase flex items-center gap-1 hover:bg-blue-900 transition-colors"
+                                title={`Guardar ${activeRoot} a JSON`}
+                            >
+                                <span className="material-symbols-outlined text-xs">save</span>
+                                Guardar
+                            </button>
+                        </div>
+                    )}
+
                     {currentPath && currentPath !== activeRoot && (
                         <button 
                             onClick={handleNavigateUp}

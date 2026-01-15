@@ -9,9 +9,10 @@ interface SettingsProps {
   onAddUser: (u: User) => void;
   onEditUser: (u: User) => void;
   onDeleteUser: (username: string) => void;
+  onExportUsers: () => void;
 }
 
-const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUser, onDeleteUser }) => {
+const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUser, onDeleteUser, onExportUsers }) => {
   // Form State
   const [formData, setFormData] = useState({
       username: '',
@@ -189,9 +190,20 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
 
             {/* 2. User Management */}
             <div className="bg-white dark:bg-white/5 p-6 rounded-xl border border-gray-200 dark:border-white/10 shadow-sm">
-                <div className="flex items-center gap-3 mb-4 text-primary">
-                    <span className="material-symbols-outlined">manage_accounts</span>
-                    <h3 className="font-bold">Gestión de Usuarios</h3>
+                <div className="flex items-center gap-3 mb-4 justify-between">
+                    <div className="flex items-center gap-3 text-primary">
+                        <span className="material-symbols-outlined">manage_accounts</span>
+                        <h3 className="font-bold">Gestión de Usuarios</h3>
+                    </div>
+                    {/* Botón para guardar musuarios.json */}
+                    <button 
+                        onClick={onExportUsers}
+                        className="bg-azul-header text-white text-[10px] font-bold uppercase px-3 py-1.5 rounded flex items-center gap-1 hover:bg-blue-900"
+                        title="Guardar usuarios a musuarios.json"
+                    >
+                        <span className="material-symbols-outlined text-xs">save</span>
+                        Guardar DB
+                    </button>
                 </div>
                 
                 {/* Form */}

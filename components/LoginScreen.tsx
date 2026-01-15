@@ -5,11 +5,11 @@ import { User } from '../types';
 interface LoginScreenProps {
   onLoginSuccess: (user: User) => void;
   users: User[];
-  onUpdate: () => void;
+  onUpdateUsers: () => void;
   isUpdating: boolean;
 }
 
-const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, users, onUpdate, isUpdating }) => {
+const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, users, onUpdateUsers, isUpdating }) => {
   const [identifier, setIdentifier] = useState(''); // Can be username or phone
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -120,12 +120,12 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, users, onUpda
                  </div>
 
                  <button 
-                     onClick={onUpdate}
+                     onClick={onUpdateUsers}
                      disabled={isUpdating}
                      className="w-full bg-white dark:bg-white/5 hover:bg-gray-50 dark:hover:bg-white/10 text-azul-cauto dark:text-blue-300 font-bold py-3 rounded-xl border border-gray-200 dark:border-white/10 flex items-center justify-center gap-2 transition-all text-sm"
                  >
                      <span className={`material-symbols-outlined ${isUpdating ? 'animate-spin' : ''}`}>cloud_download</span>
-                     <span>{isUpdating ? 'Descargando...' : 'Actualizar Base de Datos (Nube)'}</span>
+                     <span>{isUpdating ? 'Descargando...' : 'Actualizar Usuarios (Github)'}</span>
                  </button>
              </div>
           </div>
