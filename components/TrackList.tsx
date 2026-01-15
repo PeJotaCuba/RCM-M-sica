@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Track } from '../types';
 
 interface TrackListProps {
@@ -12,18 +12,42 @@ interface TrackListProps {
 }
 
 const FIXED_ROOTS = ['Música 1', 'Música 2', 'Música 3', 'Música 4', 'Música 5'];
+const ITEMS_PER_PAGE = 50;
 
 const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTxt, isAdmin, onSyncRoot, onExportRoot }) => {
+  // Input State (Visual)
+  const [inputValue, setInputValue] = useState('');
+  // Query State (Applied after delay)
   const [searchQuery, setSearchQuery] = useState('');
   
   // Navigation State
   const [activeRoot, setActiveRoot] = useState<string>(FIXED_ROOTS[0]); 
   const [currentPath, setCurrentPath] = useState<string>(''); 
 
+  // Pagination State (To prevent rendering freezing)
+  const [renderLimit, setRenderLimit] = useState(ITEMS_PER_PAGE);
+
+  // Debounce Effect: Updates search query only after user stops typing for 300ms
+  useEffect(() => {
+      const handler = setTimeout(() => {
+          setSearchQuery(inputValue);
+      }, 300);
+
+      return () => {
+          clearTimeout(handler);
+      };
+  }, [inputValue]);
+
+  // Reset pagination when filter or view changes
+  useEffect(() => {
+      setRenderLimit(ITEMS_PER_PAGE);
+  }, [searchQuery, activeRoot, currentPath]);
+
   const handleRootChange = (root: string) => {
       setActiveRoot(root);
       setCurrentPath(''); 
-      setSearchQuery(''); 
+      setInputValue(''); 
+      setSearchQuery('');
   };
 
   const handleNavigateUp = () => {
@@ -43,13 +67,13 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
   const handleFolderClick = (folderPath: string) => {
       setCurrentPath(folderPath);
       
-      // Determine the root of this folder to set the active tab correctly
       const folderRoot = folderPath.split('/')[0];
       const matchingFixedRoot = FIXED_ROOTS.find(r => r.toLowerCase() === folderRoot.toLowerCase());
       if (matchingFixedRoot) {
           setActiveRoot(matchingFixedRoot);
       }
       
+      setInputValue('');
       setSearchQuery('');
   };
 
@@ -59,37 +83,48 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
       }
   };
 
+  const handleLoadMore = () => {
+      setRenderLimit(prev => prev + ITEMS_PER_PAGE);
+  };
+
   // --- Filtering Logic ---
   const displayItems = useMemo(() => {
       // --- GLOBAL SEARCH MODE ---
       if (searchQuery.trim()) {
           const lowerQuery = searchQuery.toLowerCase();
           
-          // 1. Find matching TRACKS
-          const matchingTracks = tracks.filter(t => 
-              t.filename.toLowerCase().includes(lowerQuery) ||
-              t.metadata.title.toLowerCase().includes(lowerQuery) ||
-              t.metadata.performer.toLowerCase().includes(lowerQuery) ||
-              t.path.toLowerCase().includes(lowerQuery)
-          ).map(t => ({
-              type: 'track' as const,
-              data: t,
-              key: t.id
-          }));
-
-          // 2. Find matching FOLDERS
+          const matchingTracks: any[] = [];
           const matchingFolders = new Set<string>();
-          tracks.forEach(t => {
-              if (!t.path) return;
-              const segments = t.path.split('/');
-              let progressive = "";
-              segments.forEach(seg => {
-                  progressive = progressive ? `${progressive}/${seg}` : seg;
-                  if (seg.toLowerCase().includes(lowerQuery)) {
-                      matchingFolders.add(progressive);
+
+          // Optimized single-pass loop
+          for (const t of tracks) {
+               // Track Matching
+               const matchesTrack = 
+                  t.filename.toLowerCase().includes(lowerQuery) ||
+                  t.metadata.title.toLowerCase().includes(lowerQuery) ||
+                  t.metadata.performer.toLowerCase().includes(lowerQuery) ||
+                  (t.path && t.path.toLowerCase().includes(lowerQuery));
+
+               if (matchesTrack) {
+                   matchingTracks.push({
+                      type: 'track' as const,
+                      data: t,
+                      key: t.id
+                   });
+               }
+
+               // Folder Matching
+               if (t.path) {
+                  const segments = t.path.split('/');
+                  let progressive = "";
+                  for (const seg of segments) {
+                      progressive = progressive ? `${progressive}/${seg}` : seg;
+                      if (seg.toLowerCase().includes(lowerQuery)) {
+                          matchingFolders.add(progressive);
+                      }
                   }
-              });
-          });
+               }
+          }
 
           const folderItems = Array.from(matchingFolders).map(fPath => ({
               type: 'folder' as const,
@@ -103,47 +138,39 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
 
       // --- BROWSE MODE (Tab Scoped) ---
       
-      // Filter tracks that belong to the Active Root
-      const rootTracks = tracks.filter(t => {
-          if (!t.path) return false;
-          // Normalized comparison
-          return t.path.toLowerCase().startsWith(activeRoot.toLowerCase());
-      });
-
       const targetPath = currentPath || activeRoot;
+      const targetPathLower = targetPath.toLowerCase();
+      const activeRootLower = activeRoot.toLowerCase();
+
+      // Filter tracks by active root first
+      const rootTracks = tracks.filter(t => t.path && t.path.toLowerCase().startsWith(activeRootLower));
 
       const foldersMap = new Set<string>();
       const filesList: any[] = [];
 
-      rootTracks.forEach(t => {
-          const trackPath = t.path; // Clean Path (Folder structure only)
+      for (const t of rootTracks) {
+          const trackPath = t.path; 
           
-          // Only look at tracks inside current targetPath
-          if (!trackPath.startsWith(targetPath)) return;
+          if (!trackPath.toLowerCase().startsWith(targetPathLower)) continue;
 
-          // If trackPath is EXACTLY targetPath, the file is right here.
-          if (trackPath === targetPath || trackPath === targetPath + '/') {
+          // Check if direct child
+          if (trackPath.length === targetPath.length || (trackPath.length === targetPath.length + 1 && trackPath.endsWith('/'))) {
               filesList.push({
                   type: 'track' as const,
                   data: t,
                   key: t.id
               });
           } else {
-              // It's in a subfolder. Find the immediate next folder name.
-              let relative = trackPath.substring(targetPath.length);
-              if (relative.startsWith('/')) relative = relative.substring(1);
+              // It's in a subfolder
+              const relative = trackPath.substring(targetPath.length).replace(/^\//, '');
+              const nextFolder = relative.split('/')[0];
               
-              if (!relative) return; 
-
-              const segments = relative.split('/');
-              const nextFolder = segments[0];
-
               if (nextFolder) {
-                  const fullFolderPath = targetPath === '' ? nextFolder : `${targetPath}/${nextFolder}`;
+                  const fullFolderPath = targetPath ? `${targetPath}/${nextFolder}` : nextFolder;
                   foldersMap.add(fullFolderPath);
               }
           }
-      });
+      }
 
       const foldersList = Array.from(foldersMap).sort().map(fPath => ({
           type: 'folder' as const,
@@ -152,13 +179,14 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
           key: fPath
       }));
 
-      // Sort files alphabetically
       filesList.sort((a, b) => a.data.filename.localeCompare(b.data.filename));
 
       return [...foldersList, ...filesList];
 
   }, [tracks, activeRoot, currentPath, searchQuery]);
 
+  // Sliced items for rendering
+  const visibleItems = displayItems.slice(0, renderLimit);
 
   return (
     <div className="flex flex-col h-full bg-background-light dark:bg-background-dark">
@@ -166,7 +194,7 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
       <div className="bg-white dark:bg-background-dark shadow-sm border-b border-gray-200 dark:border-gray-800 sticky top-0 z-10">
         
         {/* 1. FIXED TABS */}
-        {!searchQuery && (
+        {!inputValue && (
             <div className="flex w-full overflow-x-auto no-scrollbar bg-azul-header text-white">
                 {FIXED_ROOTS.map(root => (
                     <button 
@@ -195,12 +223,12 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
                 <input 
                     className="flex w-full border-none bg-transparent text-gray-900 dark:text-white focus:ring-0 placeholder:text-gray-400 px-3 text-sm font-normal" 
                     placeholder="Buscar en toda la base de datos..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
+                    value={inputValue}
+                    onChange={(e) => setInputValue(e.target.value)}
                 />
-                {searchQuery && (
+                {inputValue && (
                     <button 
-                        onClick={() => setSearchQuery('')}
+                        onClick={() => { setInputValue(''); setSearchQuery(''); }}
                         className="pr-3 text-gray-400 hover:text-gray-600 flex items-center"
                     >
                         <span className="material-symbols-outlined text-lg">close</span>
@@ -209,7 +237,7 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
                 </div>
             </label>
 
-            {!searchQuery && (
+            {!inputValue && (
                 <div className="flex flex-wrap items-center justify-between gap-2 text-gray-500 text-xs min-h-[20px]">
                     <div className="flex items-center gap-2">
                         <span className="material-symbols-outlined text-base text-miel">hard_drive</span>
@@ -258,9 +286,9 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
                 </div>
             )}
             
-            {searchQuery && (
+            {inputValue && (
                 <div className="text-xs text-gray-500 px-1 font-semibold flex justify-between">
-                    <span>Resultados para "{searchQuery}"</span>
+                    <span>{searchQuery !== inputValue ? 'Buscando...' : `Resultados para "${searchQuery}"`}</span>
                     <span>{displayItems.length} encontrados</span>
                 </div>
             )}
@@ -270,7 +298,7 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
       {/* List Content */}
       <div className="flex-1 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-800 pb-24 bg-white dark:bg-background-dark">
         {/* Upload Area - Show if not searching and user is admin */}
-        {!searchQuery && isAdmin && (
+        {!inputValue && isAdmin && (
             <div className="p-4 bg-gray-50 dark:bg-white/5 border-b border-dashed border-gray-300 dark:border-gray-700">
                 <label className="flex items-center justify-center gap-3 p-3 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg cursor-pointer hover:border-primary hover:bg-white dark:hover:bg-white/10 transition-all group">
                     <span className="material-symbols-outlined text-gray-400 group-hover:text-primary">upload_file</span>
@@ -280,67 +308,81 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
             </div>
         )}
 
-        {displayItems.length === 0 ? (
+        {visibleItems.length === 0 ? (
            <div className="flex flex-col items-center justify-center py-20 text-gray-400">
              <span className="material-symbols-outlined text-5xl mb-4 text-gray-200 dark:text-gray-700">
-                 {searchQuery ? 'search_off' : 'folder_open'}
+                 {inputValue ? 'search_off' : 'folder_open'}
              </span>
-             <p className="text-sm font-medium">{searchQuery ? 'Sin resultados' : 'Carpeta vacía'}</p>
+             <p className="text-sm font-medium">{inputValue ? 'Sin resultados' : 'Carpeta vacía'}</p>
              <p className="text-xs mt-1 opacity-60">
-                 {searchQuery ? 'Intenta con otro término' : 'No se encontraron elementos'}
+                 {inputValue ? 'Intenta con otro término' : 'No se encontraron elementos'}
              </p>
            </div>
         ) : (
-          displayItems.map(item => (
-            <div 
-              key={item.key} 
-              onClick={() => item.type === 'folder' ? handleFolderClick(item.fullPath) : onSelectTrack(item.data)}
-              className="group flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-white/5 transition-colors cursor-pointer active:bg-gray-100"
-            >
-              {/* Icon */}
-              <div className={`flex items-center justify-center rounded-lg shrink-0 size-10 ${item.type === 'track' ? 'bg-orange-50 text-primary dark:bg-primary/20' : 'bg-blue-50 text-azul-header dark:bg-blue-900/30 dark:text-blue-300'}`}>
-                <span className={`material-symbols-outlined ${item.type === 'folder' ? 'material-symbols-filled' : ''} text-2xl`}>
-                    {item.type === 'folder' ? 'folder' : 'music_note'}
-                </span>
-              </div>
+            <>
+              {visibleItems.map(item => (
+                <div 
+                  key={item.key} 
+                  onClick={() => item.type === 'folder' ? handleFolderClick(item.fullPath) : onSelectTrack(item.data)}
+                  className="group flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-white/5 transition-colors cursor-pointer active:bg-gray-100"
+                >
+                  {/* Icon */}
+                  <div className={`flex items-center justify-center rounded-lg shrink-0 size-10 ${item.type === 'track' ? 'bg-orange-50 text-primary dark:bg-primary/20' : 'bg-blue-50 text-azul-header dark:bg-blue-900/30 dark:text-blue-300'}`}>
+                    <span className={`material-symbols-outlined ${item.type === 'folder' ? 'material-symbols-filled' : ''} text-2xl`}>
+                        {item.type === 'folder' ? 'folder' : 'music_note'}
+                    </span>
+                  </div>
 
-              {/* Text */}
-              <div className="flex flex-col flex-1 min-w-0">
-                <div className="flex items-center justify-between">
-                    <p className="text-gray-900 dark:text-gray-100 text-sm font-semibold leading-tight truncate pr-2">
-                        {item.type === 'folder' ? item.name : (item.data.metadata.title || item.data.filename)}
-                    </p>
-                    {/* Show root tag in search mode if item belongs to different root */}
-                    {searchQuery && (
-                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 uppercase font-bold shrink-0">
-                            {item.fullPath ? item.fullPath.split('/')[0] : (item.data.path ? item.data.path.split('/')[0] : '')}
-                        </span>
-                    )}
-                </div>
-                
-                {item.type === 'track' && (
-                    <div className="flex items-center gap-2 mt-0.5">
-                        <p className="text-gray-500 dark:text-gray-400 text-[11px] truncate">
-                            {item.data.metadata.performer || "Desconocido"}
+                  {/* Text */}
+                  <div className="flex flex-col flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                        <p className="text-gray-900 dark:text-gray-100 text-sm font-semibold leading-tight truncate pr-2">
+                            {item.type === 'folder' ? item.name : (item.data.metadata.title || item.data.filename)}
                         </p>
+                        {/* Show root tag in search mode if item belongs to different root */}
+                        {inputValue && (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 uppercase font-bold shrink-0">
+                                {item.fullPath ? item.fullPath.split('/')[0] : (item.data.path ? item.data.path.split('/')[0] : '')}
+                            </span>
+                        )}
                     </div>
-                )}
-                
-                {/* Show full path when searching */}
-                {searchQuery && (
-                    <p className="text-gray-400 text-[10px] mt-0.5 truncate flex items-center gap-1">
-                        <span className="material-symbols-outlined text-[10px]">folder</span>
-                        {item.type === 'track' ? item.data.path : item.fullPath}
-                    </p>
-                )}
-              </div>
+                    
+                    {item.type === 'track' && (
+                        <div className="flex items-center gap-2 mt-0.5">
+                            <p className="text-gray-500 dark:text-gray-400 text-[11px] truncate">
+                                {item.data.metadata.performer || "Desconocido"}
+                            </p>
+                        </div>
+                    )}
+                    
+                    {/* Show full path when searching */}
+                    {inputValue && (
+                        <p className="text-gray-400 text-[10px] mt-0.5 truncate flex items-center gap-1">
+                            <span className="material-symbols-outlined text-[10px]">folder</span>
+                            {item.type === 'track' ? item.data.path : item.fullPath}
+                        </p>
+                    )}
+                  </div>
+                  
+                  {/* Chevron for folder */}
+                  {item.type === 'folder' && (
+                      <span className="material-symbols-outlined text-gray-300 dark:text-gray-600 text-xl">chevron_right</span>
+                  )}
+                </div>
+              ))}
               
-              {/* Chevron for folder */}
-              {item.type === 'folder' && (
-                  <span className="material-symbols-outlined text-gray-300 dark:text-gray-600 text-xl">chevron_right</span>
+              {/* Load More Button */}
+              {displayItems.length > visibleItems.length && (
+                  <div className="p-4 flex justify-center">
+                      <button 
+                        onClick={handleLoadMore}
+                        className="text-xs font-bold text-gray-500 hover:text-primary bg-gray-100 dark:bg-white/5 hover:bg-gray-200 px-4 py-2 rounded-full transition-colors"
+                      >
+                          Mostrar más resultados ({visibleItems.length} de {displayItems.length})
+                      </button>
+                  </div>
               )}
-            </div>
-          ))
+            </>
         )}
       </div>
     </div>
