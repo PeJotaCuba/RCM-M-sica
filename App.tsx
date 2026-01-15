@@ -57,19 +57,27 @@ const App: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false); // Visual indicator for saving
 
   // Helper to save tracks (Optimized for IndexedDB)
-  const updateTracks = async (newTracks: Track[] | ((prev: Track[]) => Track[])) => {
-      let updated: Track[] = [];
+  // FIX: Calculamos el nuevo estado ANTES de llamar a setTracks y saveTracksToDB
+  // para evitar guardar arrays vacíos debido a la asincronía de React.
+  const updateTracks = async (newTracksInput: Track[] | ((prev: Track[]) => Track[])) => {
+      // 1. Calcular el nuevo estado basado en el actual (tracks)
+      let finalTracks: Track[];
       
-      // Update State Immediately (Responsive UI)
-      setTracks(prev => {
-          updated = typeof newTracks === 'function' ? newTracks(prev) : newTracks;
-          return updated;
-      });
+      if (typeof newTracksInput === 'function') {
+          // Si es una función de actualización (ej: prev => ...), la ejecutamos con el estado actual
+          finalTracks = newTracksInput(tracks);
+      } else {
+          // Si es un array directo, lo usamos
+          finalTracks = newTracksInput;
+      }
 
-      // Save to IndexedDB in background
+      // 2. Actualizar la interfaz (React)
+      setTracks(finalTracks);
+
+      // 3. Guardar en Base de Datos (IndexedDB)
       setIsSaving(true);
       try {
-          await saveTracksToDB(updated);
+          await saveTracksToDB(finalTracks);
       } catch (e) {
           console.error("Error crítico guardando base de datos local:", e);
           alert("Error: No se pudo guardar la base de datos en el dispositivo. Verifique el espacio disponible.");
@@ -164,13 +172,12 @@ const App: React.FC = () => {
   };
 
   const handleLogout = () => {
-      // Elimina solo la sesión, MANTIENE los datos cargados (tracks y recents)
+      // Elimina solo la sesión, MANTIENE los datos cargados (tracks y recents) para persistencia
       localStorage.removeItem(AUTH_KEY);
       setAuthMode(null);
       setCurrentUser(null);
       setView(ViewState.LOGIN);
       setSelectedTrack(null);
-      // No limpiamos setRecentTracks([]) para que persistan en el dispositivo
   };
 
   // --- USER MANAGEMENT ---
@@ -226,6 +233,7 @@ const App: React.FC = () => {
 
           // Optimización: Filtrar de forma segura usando el path
           // Mantenemos todo lo que NO sea de esta raíz, y agregamos lo nuevo
+          // Usamos 'tracks' del estado actual (closure)
           const tracksToKeep = tracks.filter(t => !t.path.startsWith(rootName));
           const updatedList = [...tracksToKeep, ...newTracks];
           
