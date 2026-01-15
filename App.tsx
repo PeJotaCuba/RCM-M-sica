@@ -10,10 +10,14 @@ import Settings from './components/Settings';
 import Productions from './components/Productions';
 import { fetchCreditsFromGemini } from './services/geminiService';
 import * as XLSX from 'xlsx';
+import initSqlJs from 'sql.js';
 
 const DB_KEY = 'rcm_db_datosm';
 const AUTH_KEY = 'rcm_auth_session';
 const USERS_KEY = 'rcm_users_db';
+
+// REEMPLAZA ESTO CON TU URL REAL DE GITHUB (RAW)
+const GITHUB_DB_URL = "https://raw.githubusercontent.com/TU_USUARIO/TU_REPO/main/mdatos.db";
 
 // Default admin if no users exist
 const DEFAULT_ADMIN: User = { 
@@ -64,8 +68,6 @@ const App: React.FC = () => {
       if (currentUser) {
           const stillExists = newUsers.find(u => u.username === currentUser.username);
           
-          // Logic: If user deleted OR password changed, force logout.
-          // If just details changed (name/phone), update current session.
           if (!stillExists) {
                handleLogout();
                alert("Su usuario ha sido eliminado. La sesión se ha cerrado.");
@@ -73,7 +75,6 @@ const App: React.FC = () => {
                handleLogout();
                alert("Su contraseña ha cambiado. Por favor inicie sesión nuevamente.");
           } else {
-               // Update session info seamlessly
                setCurrentUser(stillExists);
                localStorage.setItem(AUTH_KEY, JSON.stringify(stillExists));
           }
@@ -110,7 +111,6 @@ const App: React.FC = () => {
     if (savedUserStr) {
         try {
             const savedUser = JSON.parse(savedUserStr);
-            // Verify if user still exists in the DB and matches credentials
             const validUser = currentUsersList.find(u => u.username === savedUser.username && u.password === savedUser.password);
             
             if (validUser) {
@@ -118,7 +118,6 @@ const App: React.FC = () => {
                 setAuthMode(validUser.role);
                 setView(ViewState.LIST);
             } else {
-                // Invalid session (user deleted or changed)
                 localStorage.removeItem(AUTH_KEY);
             }
         } catch { 
@@ -160,96 +159,94 @@ const App: React.FC = () => {
       updateUsers(users.filter(u => u.username !== username));
   };
 
-  // --- SYNC WITH GOOGLE DRIVE (JSON) ---
+  // --- SYNC WITH GITHUB (SQLITE DB) ---
   const handleUpdateDatabase = async () => {
-      // Allow update if Admin OR if we are on Login screen (to pull initial data)
       if (authMode !== 'admin' && view !== ViewState.LOGIN) return;
 
       const confirmUpdate = window.confirm(
-          `¿Actualizar desde la Nube?\n\nSe buscará el archivo 'datosm.json' en Google Drive.\nEsto reemplazará la base de datos local con la versión de la nube.`
+          `¿Actualizar desde GitHub?\n\nSe buscará el archivo 'mdatos.db'.\nEsto reemplazará la base de datos local.`
       );
       if (!confirmUpdate) return;
 
       setIsUpdating(true);
       
-      const FILE_ID = "1qgsO1JFVbSw1Q1Z-1b2stT2U7h2Vw7W6";
-      const directUrl = `https://drive.google.com/uc?export=download&id=${FILE_ID}`;
-      
-      // Strategy: Try proxies first because direct fetch from browser almost always fails CORS.
-      // We try corsproxy.io first (fast), then allorigins (reliable backup).
-      const attempts = [
-          `https://corsproxy.io/?${encodeURIComponent(directUrl)}`,
-          `https://api.allorigins.win/raw?url=${encodeURIComponent(directUrl)}`
-      ];
-
-      let jsonData: any = null;
-      let success = false;
-
-      for (const url of attempts) {
-          try {
-              console.log("Intentando descargar base de datos...");
-              const response = await fetch(url);
-              if (response.ok) {
-                  // Some proxies might return text/plain or other types, ensure we parse it as JSON
-                  const text = await response.text();
-                  try {
-                      jsonData = JSON.parse(text);
-                      // Basic validation to ensure it's not a proxy error page
-                      if (Array.isArray(jsonData) || (typeof jsonData === 'object' && (jsonData.tracks || jsonData.users))) {
-                           success = true;
-                           break; // Stop trying other proxies
-                      }
-                  } catch (parseError) {
-                      console.warn("JSON Parse error", parseError);
-                  }
-              }
-          } catch (e) {
-              console.warn("Fallo intento de descarga en proxy", e);
-          }
-      }
-
-      if (!success || !jsonData) {
-          setIsUpdating(false);
-          alert("Error: No se pudo descargar el archivo de configuración. \n\nPosibles causas:\n1. Bloqueo de red (CORS).\n2. El archivo en Drive no es público (Verifique 'Cualquiera con el enlace').\n3. Problema temporal de conectividad.");
-          return;
-      }
-      
       try {
-          let trackCount = 0;
-          let userCount = 0;
+          // 1. Descargar el archivo binario desde GitHub
+          console.log("Descargando mdatos.db desde:", GITHUB_DB_URL);
+          const response = await fetch(GITHUB_DB_URL);
+          
+          if (!response.ok) throw new Error(`Error HTTP: ${response.status}`);
+          
+          const arrayBuffer = await response.arrayBuffer();
 
-          // Handle simple Array (Tracks only) OR Object { tracks: [], users: [] }
-          if (Array.isArray(jsonData)) {
-               updateTracks(jsonData);
-               trackCount = jsonData.length;
-          } else if (typeof jsonData === 'object') {
-               if (jsonData.tracks && Array.isArray(jsonData.tracks)) {
-                   updateTracks(jsonData.tracks);
-                   trackCount = jsonData.tracks.length;
-               }
-               // This allows syncing users if they are included in the JSON in the future
-               if (jsonData.users && Array.isArray(jsonData.users)) {
-                   updateUsers(jsonData.users);
-                   userCount = jsonData.users.length;
-               }
-          } else {
-               throw new Error("Formato JSON no reconocido");
+          // 2. Inicializar SQL.js
+          const SQL = await initSqlJs({
+            // Es necesario apuntar al archivo WASM correcto
+            locateFile: file => `https://sql.js.org/dist/${file}`
+          });
+
+          // 3. Cargar Base de Datos
+          const db = new SQL.Database(new Uint8Array(arrayBuffer));
+
+          // 4. Ejecutar consulta
+          // ASUMIMOS QUE LA TABLA SE LLAMA 'tracks'
+          // Ajusta esta consulta según la estructura real de tu .db
+          const stmt = db.prepare("SELECT * FROM tracks");
+          
+          const newTracks: Track[] = [];
+
+          while (stmt.step()) {
+              const row = stmt.getAsObject();
+              
+              // Mapeo flexible de columnas SQL -> Objeto Track
+              // Intenta leer columnas comunes (en inglés o español)
+              const title = (row.title || row.titulo || 'Sin Título') as string;
+              const author = (row.author || row.autor || 'Desconocido') as string;
+              const performer = (row.performer || row.interprete || row.artist || 'Desconocido') as string;
+              const album = (row.album || row.carpeta || row.folder || 'Desconocido') as string;
+              const path = (row.path || row.ruta || album) as string;
+              const filename = (row.filename || row.archivo || `${title}.mp3`) as string;
+              const year = (row.year || row.ano || row.anio || '') as string;
+              const genre = (row.genre || row.genero || '') as string;
+              const authorCountry = (row.authorCountry || row.pais_autor || '') as string;
+              const performerCountry = (row.performerCountry || row.pais_interprete || '') as string;
+
+              newTracks.push({
+                  id: `db-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                  filename: filename,
+                  path: path,
+                  size: 'DB',
+                  isVerified: true,
+                  metadata: {
+                      title,
+                      author,
+                      authorCountry,
+                      performer,
+                      performerCountry,
+                      album,
+                      year: String(year),
+                      genre
+                  }
+              });
           }
 
-          let msg = `Sincronización exitosa.\n`;
-          if (trackCount > 0) msg += `- ${trackCount} temas actualizados.\n`;
-          if (userCount > 0) msg += `- ${userCount} usuarios actualizados.\n`;
-          
-          alert(msg);
-          
-          // Force reload on login screen to ensure clean state
-          if (view === ViewState.LOGIN) {
-              window.location.reload();
+          stmt.free();
+          db.close();
+
+          if (newTracks.length > 0) {
+              updateTracks(newTracks);
+              alert(`Sincronización Exitosa.\nSe han cargado ${newTracks.length} temas desde la base de datos SQLite.`);
+              
+              if (view === ViewState.LOGIN) {
+                  window.location.reload();
+              }
+          } else {
+              alert("La base de datos se descargó, pero la tabla 'tracks' parece estar vacía o no existe.");
           }
 
       } catch (error) {
           console.error("Update failed", error);
-          alert("El archivo descargado tiene un formato incorrecto.");
+          alert("Error al sincronizar con GitHub.\n\nVerifique:\n1. Que la URL en el código sea correcta.\n2. Que el archivo 'mdatos.db' exista en el repo.\n3. Que el repo sea público.");
       } finally {
           setIsUpdating(false);
       }
@@ -262,7 +259,6 @@ const App: React.FC = () => {
           return;
       }
       
-      // Export current state. 
       const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(tracks, null, 2));
       const downloadAnchorNode = document.createElement('a');
       downloadAnchorNode.setAttribute("href", dataStr);
@@ -274,7 +270,6 @@ const App: React.FC = () => {
 
   // --- HANDLE MANUAL TXT UPLOAD PER TAB ---
   const handleUploadTxt = async (file: File, targetRoot: string) => {
-      // Only Admin
       if (authMode !== 'admin') {
           alert("Solo el administrador puede cargar archivos.");
           return;
@@ -364,9 +359,6 @@ const App: React.FC = () => {
   // --- NAVIGATION HANDLER (RESET TO LIST) ---
   const navigateTo = (v: ViewState) => {
       setView(v);
-      if (v === ViewState.LIST) {
-          // Reset selection logic if needed, but keeping selection is usually fine
-      }
   };
 
   return (
@@ -399,14 +391,14 @@ const App: React.FC = () => {
                         </button>
                     )}
                     
-                    {/* Botón Update ahora apunta a Drive */}
+                    {/* Botón Update ahora apunta a GitHub/SQLite */}
                     <button 
                         onClick={handleUpdateDatabase}
                         className={`text-white bg-white/10 hover:bg-white/20 p-2 rounded-full transition-colors flex items-center justify-center size-10 ${isUpdating ? 'animate-spin bg-white/30' : ''}`}
-                        title="Sincronizar desde Drive"
+                        title="Sincronizar desde GitHub (mdatos.db)"
                         disabled={isUpdating}
                     >
-                        <span className="material-symbols-outlined text-xl">cloud_sync</span>
+                        <span className="material-symbols-outlined text-xl">sync</span>
                     </button>
 
                     <button 
@@ -423,7 +415,8 @@ const App: React.FC = () => {
         {isUpdating && (
             <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm text-white">
                 <div className="size-16 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4"></div>
-                <p className="font-bold text-lg animate-pulse">Sincronizando con Drive...</p>
+                <p className="font-bold text-lg animate-pulse">Descargando DB...</p>
+                <p className="text-xs text-gray-400 mt-2">GitHub / mdatos.db</p>
             </div>
         )}
 
