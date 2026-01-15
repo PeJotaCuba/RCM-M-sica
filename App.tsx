@@ -343,7 +343,7 @@ const App: React.FC = () => {
   const navigateTo = (v: ViewState) => setView(v);
 
   return (
-    <div className="max-w-md mx-auto h-screen bg-gray-100 shadow-2xl overflow-hidden relative border-x border-gray-200 flex flex-col">
+    <div className="max-w-md mx-auto h-[100dvh] bg-gray-100 shadow-2xl overflow-hidden relative border-x border-gray-200 flex flex-col">
         {view !== ViewState.RESULTS && (
              <header className="bg-azul-header text-white px-4 py-4 flex items-center justify-between shadow-md relative z-20 shrink-0">
                 <div 
