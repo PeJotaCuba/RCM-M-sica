@@ -9,6 +9,13 @@ interface TrackListProps {
   isAdmin: boolean;
   onSyncRoot: (root: string) => void;
   onExportRoot: (root: string) => void;
+  onClearRoot: (root: string) => void;
+  
+  // Selection Props
+  selectedTrackIds?: Set<string>;
+  onToggleSelection?: (track: Track) => void;
+  onDownloadReport?: () => void;
+  isSelectionView?: boolean;
 }
 
 const FIXED_ROOTS = ['Música 1', 'Música 2', 'Música 3', 'Música 4', 'Música 5', 'Otros'];
@@ -16,7 +23,11 @@ const ITEMS_PER_PAGE = 50;
 
 type SearchScope = 'global' | 'root';
 
-const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTxt, isAdmin, onSyncRoot, onExportRoot }) => {
+const TrackList: React.FC<TrackListProps> = ({ 
+    tracks, onSelectTrack, onUploadTxt, isAdmin, 
+    onSyncRoot, onExportRoot, onClearRoot,
+    selectedTrackIds, onToggleSelection, onDownloadReport, isSelectionView
+}) => {
   // Input State (Visual)
   const [inputValue, setInputValue] = useState('');
   // Query State (Applied after delay)
@@ -51,14 +62,13 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
   useEffect(() => {
     const handlePopState = (event: PopStateEvent) => {
         // If we are deep in folders (currentPath exists) AND not searching, go up
-        if (currentPath && !inputValue) {
+        if (currentPath && !inputValue && !isSelectionView) {
             // Prevent default back behavior (exit) if we handled it
             handleNavigateUp();
         }
     };
 
-    // Push a state when entering a folder to allow "back" to work
-    if (currentPath) {
+    if (currentPath && !isSelectionView) {
         window.history.pushState({ folder: currentPath }, '');
     }
 
@@ -66,7 +76,7 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
     return () => {
         window.removeEventListener('popstate', handlePopState);
     };
-  }, [currentPath, inputValue]);
+  }, [currentPath, inputValue, isSelectionView]);
 
 
   const handleRootChange = (root: string) => {
@@ -95,7 +105,6 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
       
       const folderRoot = folderPath.split('/')[0];
       // Sync active root tab if we clicked a folder that matches one of the fixed roots
-      // Normalize comparison to handle Musica 1 vs Música 1
       const normalize = (str: string) => str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, '');
       const matchingFixedRoot = FIXED_ROOTS.find(r => normalize(r) === normalize(folderRoot));
       
@@ -121,11 +130,32 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
       setSearchScope(prev => prev === 'global' ? 'root' : 'global');
   };
 
-  // Helper for normalization
   const normalizeStr = (str: string) => str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
   // --- Filtering Logic ---
   const displayItems = useMemo(() => {
+      // Si estamos en vista de selección, mostrar lista plana sin carpetas
+      if (isSelectionView) {
+          let list = tracks;
+          if (searchQuery.trim()) {
+              const escapeRegExp = (string: string) => string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); 
+              const cleanQuery = normalizeStr(searchQuery.trim());
+              const queryRegex = new RegExp(`\\b${escapeRegExp(cleanQuery)}`, 'i');
+              
+              list = list.filter(t => {
+                   const normFilename = normalizeStr(t.filename);
+                   const normTitle = normalizeStr(t.metadata.title || "");
+                   const normPerformer = normalizeStr(t.metadata.performer || "");
+                   return queryRegex.test(normFilename) || queryRegex.test(normTitle) || queryRegex.test(normPerformer);
+              });
+          }
+          return list.map(t => ({
+              type: 'track' as const,
+              data: t,
+              key: t.id
+          })).sort((a,b) => a.data.filename.localeCompare(b.data.filename));
+      }
+
       // --- SEARCH MODE ---
       if (searchQuery.trim()) {
           const escapeRegExp = (string: string) => string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); 
@@ -136,9 +166,7 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
           const matchingTracks: any[] = [];
           const matchingFolders = new Set<string>();
 
-          // Determinamos el pool de tracks y el prefijo de búsqueda según el alcance
           let tracksPool = tracks;
-          // Context Path es la ruta desde la que se inicia la búsqueda local
           const contextPath = currentPath || activeRoot;
 
           if (searchScope === 'root') {
@@ -146,15 +174,12 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
               tracksPool = tracks.filter(t => t.path && normalizeStr(t.path).startsWith(contextPathNorm));
           }
 
-          // Optimized single-pass loop
           for (const t of tracksPool) {
-               // Normalizar campos del track
                const normFilename = normalizeStr(t.filename);
                const normTitle = normalizeStr(t.metadata.title || "");
                const normPerformer = normalizeStr(t.metadata.performer || "");
                const normPath = t.path ? normalizeStr(t.path) : "";
 
-               // Track Matching
                const matchesTrack = 
                   queryRegex.test(normFilename) ||
                   queryRegex.test(normTitle) ||
@@ -169,14 +194,12 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
                    });
                }
 
-               // Folder Matching
                if (t.path) {
                   const segments = t.path.split('/');
                   let progressive = "";
                   for (const seg of segments) {
                       progressive = progressive ? `${progressive}/${seg}` : seg;
                       
-                      // Si el alcance es local, solo mostramos carpetas que estén DENTRO del contexto actual (normalizado)
                       if (searchScope === 'root' && !normalizeStr(progressive).startsWith(normalizeStr(contextPath))) {
                           continue;
                       }
@@ -203,13 +226,8 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
       
       const targetPath = currentPath || activeRoot;
       const targetPathNorm = normalizeStr(targetPath);
-      
-      // Filter tracks by active root logic (Normalized comparison to allow Musica1 vs Música 1)
-      // We look for tracks that start with the active Root (Música 1) OR the current Path state
-      // But if currentPath is empty, we must match activeRoot
       const rootFilterStr = normalizeStr(activeRoot);
       
-      // We assume tracks belonging to this tab start with a path that normalizes to the tab name
       const rootTracks = tracks.filter(t => {
           if (!t.path) return false;
           const pathNorm = normalizeStr(t.path);
@@ -223,84 +241,18 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
           const trackPath = t.path; 
           const trackPathNorm = normalizeStr(trackPath);
           
-          // Must start with current navigation target
           if (!trackPathNorm.startsWith(targetPathNorm)) continue;
 
-          // Determine relative depth
-          // targetPath: "Musica 1"
-          // trackPath: "Musica 1/Cubana/Song.mp3"
-          // We need to match lengths in terms of segments, not strings, to be safe, but string norm is okay for now if separators match.
-          
-          // To be precise, let's look at the remainder
-          // If targetPath is "Musica 1", remainder is "/Cubana/Song.mp3" (or "Cubana/Song.mp3")
-          // If remainder has no slashes, it's a file in this folder.
-          // If remainder has slashes, it's a folder.
-          
-          // We need to use the original string lengths for substring to extract correct folder names
-          // But we matched using normalized strings.
-          // Strategy: Find where the match ends in the original string.
-          
-          // Heuristic: If we are at root, we just take the next segment.
-          // If trackPath is "Musica 1/Cubana", and target is "Musica 1" (or "Música 1"),
-          // We assume the first segment is the root.
-          
-          const parts = trackPath.split('/');
-          const targetParts = targetPath ? targetPath.split('/') : [activeRoot]; // If empty currentPath, usage activeRoot logic
-          
-          // Logic for Root Level (currentPath is empty, but we simulate it being activeRoot)
-          // If currentPath is empty, we show items where the first segment normalizes to activeRoot
-          
-          // Actually, currentPath is initialized to '' but managed in handleRootChange to ''
-          // But handleRootChange relies on logic.
-          // Let's rely on string replace based on normalized prefix length is risky.
-          
-          // Safer: Split both by '/'. 
-          // If currentPath is defined, we want items with len = currentParts + 1 (files) or > (folders)
-          
-          // BUT: we filtered `rootTracks` based on normalized `activeRoot`.
-          // If `currentPath` is empty, we treat `activeRoot` as the base.
-          
-          // Effectively, we want to show children of `targetPath`.
-          // Issue: `targetPath` might be "Música 1" (UI) but track is "Musica 1" (File).
-          // We matched them via normalization.
-          // So we should consume the matching prefix from the track path.
-          
-          // Find the index of the first separator after the matching length?
-          // Since we verified startsWith on normalized, we can try to guess.
-          // Better: just check segments.
-          
-          // Remove the normalized prefix from normalized track path?
-          // No, we need the original casing for display.
-          
-          // Let's assume consistent delimiters '/'.
-          // Length of segments.
           const trackSegments = trackPath.split('/').filter(p => p);
-          // How many segments constitutes the "Current Path"?
-          // If currentPath is empty, we are at root "tab". The "tab" usually corresponds to the first segment of the path.
-          // So we want tracks where segment count is 2 (Root/File) -> File
-          // Or > 2 (Root/Folder/...) -> Folder
-          
-          // If currentPath is "Música 1/Cubana", count is 2.
-          // We want tracks with 3 segments (File) or > 3 (Folder).
-          
           const targetSegmentCount = currentPath ? currentPath.split('/').filter(p => p).length : 1; 
           
-          // Note: If currentPath is empty, we assume we are inside the Root (depth 1), so we look for depth 2+.
-          
           if (trackSegments.length === targetSegmentCount + 1) {
-              // Direct child file
               filesList.push({
                   type: 'track' as const,
                   data: t,
                   key: t.id
               });
           } else if (trackSegments.length > targetSegmentCount + 1) {
-              // Subfolder
-              // Get the name of the segment at index `targetSegmentCount`
-              const nextFolderName = trackSegments[targetSegmentCount];
-              
-              // We need to reconstruct the full path for the folder click
-              // It should match the track's path structure for continuity
               const folderPath = trackSegments.slice(0, targetSegmentCount + 1).join('/');
               foldersMap.add(folderPath);
           }
@@ -317,12 +269,9 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
 
       return [...foldersList, ...filesList];
 
-  }, [tracks, activeRoot, currentPath, searchQuery, searchScope]);
+  }, [tracks, activeRoot, currentPath, searchQuery, searchScope, isSelectionView]);
 
-  // Sliced items for rendering
   const visibleItems = displayItems.slice(0, renderLimit);
-
-  // Nombre de la carpeta actual para el placeholder
   const currentFolderName = currentPath ? currentPath.split('/').pop() : activeRoot;
 
   return (
@@ -330,8 +279,8 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
       {/* Header Area */}
       <div className="bg-white dark:bg-background-dark shadow-sm border-b border-gray-200 dark:border-gray-800 sticky top-0 z-10">
         
-        {/* 1. FIXED TABS */}
-        {!inputValue && (
+        {/* 1. FIXED TABS (Hide in Selection View or Search) */}
+        {!inputValue && !isSelectionView && (
             <div className="flex w-full overflow-x-auto no-scrollbar bg-azul-header text-white">
                 {FIXED_ROOTS.map(root => (
                     <button 
@@ -348,6 +297,25 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
             </div>
         )}
 
+        {/* 1.5 Header for Selection View */}
+        {isSelectionView && (
+             <div className="bg-white dark:bg-background-dark p-4 border-b border-gray-100 dark:border-gray-800 flex justify-between items-center">
+                 <div>
+                     <h2 className="text-lg font-bold text-primary">Canciones Seleccionadas</h2>
+                     <p className="text-xs text-gray-500">{tracks.length} elementos</p>
+                 </div>
+                 {onDownloadReport && tracks.length > 0 && (
+                     <button 
+                        onClick={onDownloadReport}
+                        className="bg-blue-600 text-white text-xs font-bold py-2 px-4 rounded-full flex items-center gap-1 hover:bg-blue-700"
+                     >
+                         <span className="material-symbols-outlined text-sm">download</span>
+                         Descargar DOCX
+                     </button>
+                 )}
+             </div>
+        )}
+
         {/* 2. Tools & Breadcrumbs */}
         <div className="px-4 py-3 flex flex-col gap-3">
             
@@ -359,21 +327,23 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
                     </div>
                     <input 
                         className="flex w-full border-none bg-transparent text-gray-900 dark:text-white focus:ring-0 placeholder:text-gray-400 px-3 text-sm font-normal" 
-                        placeholder={searchScope === 'global' ? "Buscar en todo..." : `Buscar en ${currentFolderName}...`}
+                        placeholder={isSelectionView ? "Filtrar seleccionados..." : (searchScope === 'global' ? "Buscar en todo..." : `Buscar en ${currentFolderName}...`)}
                         value={inputValue}
                         onChange={(e) => setInputValue(e.target.value)}
                     />
                     
-                    {/* Toggle Search Scope */}
-                    <button 
-                        onClick={toggleSearchScope}
-                        className={`px-3 flex items-center justify-center border-l border-gray-200 dark:border-gray-700 transition-colors ${searchScope === 'global' ? 'text-gray-400 hover:text-primary' : 'text-primary bg-primary/10'}`}
-                        title={searchScope === 'global' ? "Cambiar a búsqueda local" : `Cambiar a búsqueda global`}
-                    >
-                        <span className="material-symbols-outlined text-lg">
-                            {searchScope === 'global' ? 'public' : 'folder_open'}
-                        </span>
-                    </button>
+                    {/* Toggle Search Scope (Hide in Selection View) */}
+                    {!isSelectionView && (
+                        <button 
+                            onClick={toggleSearchScope}
+                            className={`px-3 flex items-center justify-center border-l border-gray-200 dark:border-gray-700 transition-colors ${searchScope === 'global' ? 'text-gray-400 hover:text-primary' : 'text-primary bg-primary/10'}`}
+                            title={searchScope === 'global' ? "Cambiar a búsqueda local" : `Cambiar a búsqueda global`}
+                        >
+                            <span className="material-symbols-outlined text-lg">
+                                {searchScope === 'global' ? 'public' : 'folder_open'}
+                            </span>
+                        </button>
+                    )}
 
                     {inputValue && (
                         <button 
@@ -386,7 +356,7 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
                 </div>
             </label>
 
-            {!inputValue && (
+            {!inputValue && !isSelectionView && (
                 <div className="flex flex-wrap items-center justify-between gap-2 text-gray-500 text-xs min-h-[20px]">
                     <div className="flex items-center gap-2">
                         <span className="material-symbols-outlined text-base text-miel">hard_drive</span>
@@ -395,15 +365,25 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
                             <>
                                 <span className="material-symbols-outlined text-sm text-gray-400">chevron_right</span>
                                 <span className="truncate font-mono text-gray-600 dark:text-gray-400 max-w-[120px]">
-                                    {/* Show relative path from root, handling normalization mismatches gracefully */}
                                     {currentPath.split('/').slice(1).join(' / ')}
                                 </span>
                             </>
                         )}
                     </div>
                     
-                    {/* Actions for current root - Update visible to all, Export admin only */}
+                    {/* Actions */}
                     <div className="flex gap-2">
+                        {isAdmin && (
+                            <button 
+                                onClick={() => onClearRoot(activeRoot)}
+                                className="bg-red-500 text-white rounded px-2 py-1 text-[10px] font-bold uppercase flex items-center gap-1 hover:bg-red-600 transition-colors"
+                                title={`BORRAR DATOS DE ${activeRoot}`}
+                            >
+                                <span className="material-symbols-outlined text-xs">delete</span>
+                                Limpiar
+                            </button>
+                        )}
+
                         <button 
                             onClick={() => onSyncRoot(activeRoot)}
                             className="bg-green-600 text-white rounded px-2 py-1 text-[10px] font-bold uppercase flex items-center gap-1 hover:bg-green-700 transition-colors"
@@ -436,23 +416,13 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
                     )}
                 </div>
             )}
-            
-            {inputValue && (
-                <div className="text-xs text-gray-500 px-1 font-semibold flex justify-between">
-                    <span>{searchQuery !== inputValue ? 'Buscando...' : `Resultados para "${searchQuery}"`}</span>
-                    <span className="flex items-center gap-1">
-                        {searchScope === 'root' && <span className="text-[10px] bg-gray-200 dark:bg-gray-700 px-1.5 py-0.5 rounded text-gray-600 dark:text-gray-300">Solo en {currentFolderName}</span>}
-                        <span>{displayItems.length} encontrados</span>
-                    </span>
-                </div>
-            )}
         </div>
       </div>
 
       {/* List Content */}
       <div className="flex-1 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-800 pb-24 bg-white dark:bg-background-dark">
         {/* Upload Area - Show if not searching and user is admin */}
-        {!inputValue && isAdmin && (
+        {!inputValue && isAdmin && !isSelectionView && (
             <div className="p-4 bg-gray-50 dark:bg-white/5 border-b border-dashed border-gray-300 dark:border-gray-700">
                 <label className="flex items-center justify-center gap-3 p-3 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg cursor-pointer hover:border-primary hover:bg-white dark:hover:bg-white/10 transition-all group">
                     <span className="material-symbols-outlined text-gray-400 group-hover:text-primary">upload_file</span>
@@ -467,9 +437,9 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
              <span className="material-symbols-outlined text-5xl mb-4 text-gray-200 dark:text-gray-700">
                  {inputValue ? 'search_off' : 'folder_open'}
              </span>
-             <p className="text-sm font-medium">{inputValue ? 'Sin resultados' : 'Carpeta vacía'}</p>
+             <p className="text-sm font-medium">{inputValue ? 'Sin resultados' : (isSelectionView ? 'No hay canciones seleccionadas' : 'Carpeta vacía')}</p>
              <p className="text-xs mt-1 opacity-60">
-                 {inputValue ? 'Intenta con otro término' : 'No se encontraron elementos'}
+                 {inputValue ? 'Intenta con otro término' : (isSelectionView ? 'Agrega canciones desde el Explorador' : 'No se encontraron elementos')}
              </p>
            </div>
         ) : (
@@ -477,24 +447,29 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
               {visibleItems.map(item => (
                 <div 
                   key={item.key} 
-                  onClick={() => item.type === 'folder' ? handleFolderClick(item.fullPath) : onSelectTrack(item.data)}
-                  className="group flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-white/5 transition-colors cursor-pointer active:bg-gray-100"
+                  className="group flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-white/5 transition-colors active:bg-gray-100"
                 >
                   {/* Icon */}
-                  <div className={`flex items-center justify-center rounded-lg shrink-0 size-10 ${item.type === 'track' ? 'bg-orange-50 text-primary dark:bg-primary/20' : 'bg-blue-50 text-azul-header dark:bg-blue-900/30 dark:text-blue-300'}`}>
+                  <div 
+                      className={`flex items-center justify-center rounded-lg shrink-0 size-10 cursor-pointer ${item.type === 'track' ? 'bg-orange-50 text-primary dark:bg-primary/20' : 'bg-blue-50 text-azul-header dark:bg-blue-900/30 dark:text-blue-300'}`}
+                      onClick={() => item.type === 'folder' ? handleFolderClick(item.fullPath) : onSelectTrack(item.data)}
+                  >
                     <span className={`material-symbols-outlined ${item.type === 'folder' ? 'material-symbols-filled' : ''} text-2xl`}>
                         {item.type === 'folder' ? 'folder' : 'music_note'}
                     </span>
                   </div>
 
                   {/* Text */}
-                  <div className="flex flex-col flex-1 min-w-0">
+                  <div 
+                      className="flex flex-col flex-1 min-w-0 cursor-pointer"
+                      onClick={() => item.type === 'folder' ? handleFolderClick(item.fullPath) : onSelectTrack(item.data)}
+                  >
                     <div className="flex items-center justify-between">
                         <p className="text-gray-900 dark:text-gray-100 text-sm font-semibold leading-tight truncate pr-2">
                             {item.type === 'folder' ? item.name : (item.data.metadata.title || item.data.filename)}
                         </p>
-                        {/* Show root tag in search mode if item belongs to different root */}
-                        {inputValue && (
+                        {/* Show root tag if needed */}
+                        {(inputValue || isSelectionView) && (
                             <span className="text-[9px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 uppercase font-bold shrink-0">
                                 {item.fullPath ? item.fullPath.split('/')[0] : (item.data.path ? item.data.path.split('/')[0] : '')}
                             </span>
@@ -510,7 +485,7 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
                     )}
                     
                     {/* Show full path when searching */}
-                    {inputValue && (
+                    {(inputValue || isSelectionView) && (
                         <p className="text-gray-400 text-[10px] mt-0.5 truncate flex items-center gap-1">
                             <span className="material-symbols-outlined text-[10px]">folder</span>
                             {item.type === 'track' ? item.data.path : item.fullPath}
@@ -518,10 +493,26 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
                     )}
                   </div>
                   
-                  {/* Chevron for folder */}
-                  {item.type === 'folder' && (
-                      <span className="material-symbols-outlined text-gray-300 dark:text-gray-600 text-xl">chevron_right</span>
-                  )}
+                  {/* Action Area: Selection Checkbox or Chevron */}
+                  <div className="flex items-center justify-center size-10 shrink-0">
+                    {item.type === 'track' && onToggleSelection && (
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onToggleSelection(item.data);
+                            }}
+                            className={`size-8 rounded-full flex items-center justify-center transition-all ${selectedTrackIds?.has(item.data.id) ? 'bg-primary text-white' : 'bg-gray-100 dark:bg-white/10 text-gray-300 dark:text-gray-600 hover:bg-gray-200'}`}
+                        >
+                            <span className="material-symbols-outlined text-lg">
+                                {selectedTrackIds?.has(item.data.id) ? 'check' : 'add'}
+                            </span>
+                        </button>
+                    )}
+
+                    {item.type === 'folder' && (
+                        <span className="material-symbols-outlined text-gray-300 dark:text-gray-600 text-xl pointer-events-none">chevron_right</span>
+                    )}
+                  </div>
                 </div>
               ))}
               

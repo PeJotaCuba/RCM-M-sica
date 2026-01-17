@@ -1,5 +1,5 @@
 
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import { Track, AuthMode, CreditInfo } from '../types';
 
 interface TrackDetailProps {
@@ -13,12 +13,8 @@ interface TrackDetailProps {
 const TrackDetail: React.FC<TrackDetailProps> = ({ track, authMode, onClose, onSearchCredits, onSaveEdit }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState<CreditInfo>(track.metadata);
-  const [audioError, setAudioError] = useState(false);
-  const [showErrorToast, setShowErrorToast] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
+  const [copied, setCopied] = useState(false);
   
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-
   const handleSave = () => {
       if (onSaveEdit) {
           onSaveEdit({
@@ -30,37 +26,20 @@ const TrackDetail: React.FC<TrackDetailProps> = ({ track, authMode, onClose, onS
       }
   };
 
-  const handlePlayAudio = () => {
-      if (!audioRef.current) return;
-      
-      // Clean up path logic for local relative serving if applicable
-      // NOTE: This assumes the app is served from a location where "Música X" folders are accessible relative to root
-      // Or handles local file access if properly configured in a specific environment.
-      // Standard browsers will block direct "file://" access from HTTP.
-      // We attempt to construct a valid URL.
-      
-      const cleanPath = track.path.replace(/\\/g, '/');
-      const cleanFilename = track.filename.replace(/\\/g, '/');
-      const src = `${cleanPath}/${cleanFilename}`;
-      
-      if (audioRef.current.src !== window.location.origin + "/" + src && !audioRef.current.src.endsWith(src)) {
-          audioRef.current.src = src;
-      }
-
-      setAudioError(false);
-      audioRef.current.play()
-        .then(() => setIsPlaying(true))
-        .catch(e => {
-            console.error("Playback error:", e);
-            handleAudioError();
-        });
+  const handleCopyPath = () => {
+      // Logic to copy exact path
+      const fullPath = `${track.path}/${track.filename}`;
+      navigator.clipboard.writeText(fullPath).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+      });
   };
 
-  const handleAudioError = () => {
-      setAudioError(true);
-      setShowErrorToast(true);
-      setIsPlaying(false);
-      setTimeout(() => setShowErrorToast(false), 3000);
+  const handleSearchAuthor = () => {
+      // Abre el navegador predeterminado con la búsqueda "{Título} autor"
+      const query = `${track.metadata.title || track.filename.replace('.mp3', '')} autor`;
+      const url = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+      window.open(url, '_blank');
   };
 
   const isAdmin = authMode === 'admin';
@@ -68,22 +47,6 @@ const TrackDetail: React.FC<TrackDetailProps> = ({ track, authMode, onClose, onS
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4 animate-fade-in" onClick={onClose}>
         
-        {/* Hidden Audio Element */}
-        <audio 
-            ref={audioRef} 
-            onError={handleAudioError} 
-            onEnded={() => setIsPlaying(false)}
-            onPause={() => setIsPlaying(false)}
-        />
-
-        {/* Error Toast */}
-        {showErrorToast && (
-            <div className="absolute top-10 left-1/2 transform -translate-x-1/2 bg-red-600 text-white px-6 py-3 rounded-full shadow-xl z-[60] animate-bounce flex items-center gap-2">
-                <span className="material-symbols-outlined">error</span>
-                <span className="font-bold text-sm">Archivo no encontrado en la ruta especificada</span>
-            </div>
-        )}
-
         <div 
             className="w-full max-w-md bg-white dark:bg-[#1a1a1a] h-[90vh] sm:h-auto sm:max-h-[90vh] rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col relative overflow-hidden animate-slide-up"
             onClick={e => e.stopPropagation()} 
@@ -103,21 +66,29 @@ const TrackDetail: React.FC<TrackDetailProps> = ({ track, authMode, onClose, onS
 
             <div className="flex-1 overflow-y-auto p-6 z-10 space-y-4">
                 
-                {/* File Info (PATH) - Clickable to Play */}
+                {/* File Info (PATH) - Copy to Clipboard */}
                 {!isEditing && (
                     <div 
-                        onClick={handlePlayAudio}
-                        className="bg-azul-header/5 dark:bg-blue-900/10 rounded-xl p-4 border border-azul-header/10 dark:border-blue-500/10 mb-2 cursor-pointer hover:bg-azul-header/10 transition-colors group relative overflow-hidden"
+                        className="bg-azul-header/5 dark:bg-blue-900/10 rounded-xl p-4 border border-azul-header/10 dark:border-blue-500/10 mb-2 group relative overflow-hidden"
                     >
                         <div className="flex items-start gap-3 relative z-10">
-                            <div className="size-10 rounded-full bg-white dark:bg-white/10 flex items-center justify-center text-azul-header dark:text-blue-400 shadow-sm group-hover:scale-110 transition-transform">
-                                <span className="material-symbols-outlined">{isPlaying ? 'pause' : 'play_arrow'}</span>
+                            <div className="size-10 rounded-full bg-white dark:bg-white/10 flex items-center justify-center text-azul-header dark:text-blue-400 shadow-sm">
+                                <span className="material-symbols-outlined">folder_open</span>
                             </div>
                             <div className="min-w-0 flex-1">
-                                <p className="text-[10px] uppercase font-bold text-azul-header/60 dark:text-blue-400/60 mb-0.5">Ruta del Archivo (Tocar para reproducir)</p>
+                                <p className="text-[10px] uppercase font-bold text-azul-header/60 dark:text-blue-400/60 mb-0.5">Ubicación del Archivo</p>
                                 <p className="text-sm font-bold text-gray-800 dark:text-gray-200 break-words leading-tight">{track.path}</p>
                                 <p className="text-xs text-gray-500 mt-1 font-mono bg-white/50 dark:bg-black/20 p-1 rounded inline-block">{track.filename}</p>
                             </div>
+                            <button 
+                                onClick={handleCopyPath}
+                                className={`size-8 rounded-full flex items-center justify-center transition-all ${copied ? 'bg-green-100 text-green-600' : 'bg-white dark:bg-white/10 text-gray-500 hover:bg-gray-100 dark:hover:bg-white/20'}`}
+                                title="Copiar ruta"
+                            >
+                                <span className="material-symbols-outlined text-lg">
+                                    {copied ? 'check' : 'content_copy'}
+                                </span>
+                            </button>
                         </div>
                     </div>
                 )}
@@ -167,14 +138,14 @@ const TrackDetail: React.FC<TrackDetailProps> = ({ track, authMode, onClose, onS
                     )}
                 </div>
 
-                {/* AI Action */}
+                {/* Google Search Action (Replaces AI) */}
                 {!isEditing && (
                     <button 
-                        onClick={onSearchCredits}
-                        className="w-full mt-2 bg-gradient-to-r from-primary to-primary-dark text-white py-3.5 rounded-xl font-bold shadow-lg shadow-primary/20 flex items-center justify-center gap-2 hover:scale-[1.02] transition-transform"
+                        onClick={handleSearchAuthor}
+                        className="w-full mt-2 bg-azul-header text-white py-3.5 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 hover:bg-opacity-90 transition-transform active:scale-95"
                     >
-                        <span className="material-symbols-outlined">travel_explore</span>
-                        Consultar IA (Completar Créditos)
+                        <span className="material-symbols-outlined">search</span>
+                        Buscar autor
                     </button>
                 )}
             </div>

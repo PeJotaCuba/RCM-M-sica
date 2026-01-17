@@ -11,10 +11,11 @@ import Productions from './components/Productions';
 import { fetchCreditsFromGemini } from './services/geminiService';
 import { loadTracksFromDB, saveTracksToDB } from './services/db'; 
 import * as XLSX from 'xlsx';
+import * as docx from 'docx';
 
 const AUTH_KEY = 'rcm_auth_session';
 const USERS_KEY = 'rcm_users_db';
-const RECENT_TRACKS_KEY = 'rcm_recent_tracks';
+// RECENT_TRACKS_KEY removed as requested
 
 // CONFIGURACIÓN DE URLS DE GITHUB
 // Mapeo explícito para garantizar la conexión correcta a los archivos del repositorio
@@ -47,9 +48,11 @@ const App: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
 
-  // Selection and History
+  // Selection and Details
   const [selectedTrack, setSelectedTrack] = useState<Track | null>(null);
-  const [recentTracks, setRecentTracks] = useState<Track[]>([]);
+  
+  // NEW: Manual Selection List (replaces recents)
+  const [selectedTracksList, setSelectedTracksList] = useState<Track[]>([]);
 
   // Search State
   const [foundCredits, setFoundCredits] = useState<CreditInfo | null>(null);
@@ -153,14 +156,6 @@ const App: React.FC = () => {
         }
         setUsers(currentUsersList);
 
-        const localRecents = localStorage.getItem(RECENT_TRACKS_KEY);
-        if (localRecents) {
-            try {
-                const parsedRecents = JSON.parse(localRecents);
-                if (Array.isArray(parsedRecents)) setRecentTracks(parsedRecents);
-            } catch {}
-        }
-
         const savedUserStr = localStorage.getItem(AUTH_KEY);
         if (savedUserStr) {
             try {
@@ -195,6 +190,7 @@ const App: React.FC = () => {
       setCurrentUser(null);
       setView(ViewState.LOGIN);
       setSelectedTrack(null);
+      setSelectedTracksList([]); // Clear selection on logout
   };
 
   const handleAddUser = (u: User) => updateUsers([...users, u]);
@@ -257,6 +253,17 @@ const App: React.FC = () => {
       }
   };
 
+  // NEW FUNCTION: Clear Data for specific root
+  const handleClearMusicRoot = async (rootName: string) => {
+      if (!window.confirm(`¿Estás seguro de que quieres ELIMINAR todos los temas de "${rootName}"?\nEsta acción no se puede deshacer.`)) {
+          return;
+      }
+
+      const tracksToKeep = tracks.filter(t => !t.path.startsWith(rootName));
+      await updateTracks(tracksToKeep);
+      alert(`Se han eliminado los datos de ${rootName}.`);
+  };
+
   const handleExportMusicRoot = (rootName: string) => {
       if (authMode !== 'admin') return;
       const rootTracks = tracks.filter(t => t.path.startsWith(rootName));
@@ -314,22 +321,79 @@ const App: React.FC = () => {
     setSelectedTrack(track);
     // Push state so back button closes it
     window.history.pushState({ trackId: track.id }, '');
-    
-    setRecentTracks(prev => {
-        const updated = [track, ...prev.filter(t => t.id !== track.id)].slice(0, 10);
-        localStorage.setItem(RECENT_TRACKS_KEY, JSON.stringify(updated));
-        return updated;
-    });
   };
 
+  // --- SELECTION LOGIC ---
+  const handleToggleSelection = (track: Track) => {
+      setSelectedTracksList(prev => {
+          const exists = prev.find(t => t.id === track.id);
+          if (exists) {
+              return prev.filter(t => t.id !== track.id);
+          } else {
+              return [...prev, track];
+          }
+      });
+  };
+
+  const handleGenerateSelectionReport = async () => {
+      if (selectedTracksList.length === 0) {
+          alert("No hay canciones seleccionadas para generar el reporte.");
+          return;
+      }
+
+      const rows = selectedTracksList.map(t => 
+          new docx.TableRow({
+              children: [
+                  new docx.TableCell({ children: [new docx.Paragraph(t.metadata.title || "Desconocido")] }),
+                  new docx.TableCell({ children: [new docx.Paragraph(t.metadata.author || "Desconocido")] }),
+                  new docx.TableCell({ children: [new docx.Paragraph(t.metadata.performer || "Desconocido")] }),
+                  new docx.TableCell({ children: [new docx.Paragraph(t.metadata.year || "")] }),
+              ]
+          })
+      );
+
+      const doc = new docx.Document({
+          sections: [{
+              properties: {},
+              children: [
+                  new docx.Paragraph({
+                      children: [new docx.TextRun({ text: "REPORTE DE CRÉDITOS SELECCIONADOS", bold: true, size: 28 })],
+                      alignment: docx.AlignmentType.CENTER,
+                      spacing: { after: 300 }
+                  }),
+                  new docx.Table({
+                      width: { size: 100, type: docx.WidthType.PERCENTAGE },
+                      rows: [
+                          new docx.TableRow({
+                              children: ["Título", "Autor", "Intérprete", "Año"].map(t => 
+                                  new docx.TableCell({ 
+                                      children: [new docx.Paragraph({text: t, bold: true})],
+                                      shading: { fill: "EEEEEE" }
+                                  })
+                              )
+                          }),
+                          ...rows
+                      ]
+                  })
+              ]
+          }]
+      });
+
+      docx.Packer.toBlob(doc).then(blob => {
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `Reporte_Seleccion_${new Date().toISOString().split('T')[0]}.docx`;
+          a.click();
+          window.URL.revokeObjectURL(url);
+      });
+  };
+  // -----------------------
+
+  // Old Search Credits logic kept for compatibility with TrackDetail prop type if needed, 
+  // but button will be removed in TrackDetail.
   const handleSearchCredits = async () => {
-    if (!selectedTrack) return;
-    setIsSearching(true);
-    setView(ViewState.RESULTS);
-    try {
-        const credits = await fetchCreditsFromGemini(selectedTrack.filename, selectedTrack.path);
-        setFoundCredits(credits);
-    } catch (e) { console.error(e); } finally { setIsSearching(false); }
+    // Legacy function, replaced by direct google search in TrackDetail
   };
 
   const handleApplyCredits = (newCredits: CreditInfo) => {
@@ -404,12 +468,27 @@ const App: React.FC = () => {
                     isAdmin={authMode === 'admin'}
                     onSyncRoot={handleSyncMusicRoot}
                     onExportRoot={handleExportMusicRoot}
+                    onClearRoot={handleClearMusicRoot}
+                    selectedTrackIds={new Set(selectedTracksList.map(t => t.id))}
+                    onToggleSelection={handleToggleSelection}
                 />
             )}
             
-            {view === ViewState.RECENT && (
-                <div className="h-full bg-background-light dark:bg-background-dark overflow-y-auto">
-                    <TrackList tracks={recentTracks} onSelectTrack={handleSelectTrack} onUploadTxt={() => {}} isAdmin={false} onSyncRoot={() => {}} onExportRoot={() => {}} />
+            {view === ViewState.SELECTION && (
+                <div className="h-full bg-background-light dark:bg-background-dark overflow-y-auto flex flex-col">
+                    <TrackList 
+                        tracks={selectedTracksList} 
+                        onSelectTrack={handleSelectTrack} 
+                        onUploadTxt={() => {}} 
+                        isAdmin={false} 
+                        onSyncRoot={() => {}} 
+                        onExportRoot={() => {}} 
+                        onClearRoot={() => {}} 
+                        selectedTrackIds={new Set(selectedTracksList.map(t => t.id))}
+                        onToggleSelection={handleToggleSelection}
+                        onDownloadReport={handleGenerateSelectionReport}
+                        isSelectionView={true}
+                    />
                 </div>
             )}
 
@@ -439,7 +518,7 @@ const App: React.FC = () => {
             )}
         </div>
 
-        {(view === ViewState.LIST || view === ViewState.RECENT) && selectedTrack && (
+        {(view === ViewState.LIST || view === ViewState.SELECTION) && selectedTrack && (
             <TrackDetail 
                 track={selectedTrack} 
                 onClose={() => setSelectedTrack(null)}
@@ -452,7 +531,7 @@ const App: React.FC = () => {
         {view !== ViewState.RESULTS && (
             <nav className="bg-white dark:bg-background-dark border-t border-gray-200 dark:border-gray-800 h-20 px-2 flex items-center justify-between pb-2 z-20 shrink-0">
                 <NavButton icon="folder_open" label="Explorador" active={view === ViewState.LIST} onClick={() => navigateTo(ViewState.LIST)} />
-                <NavButton icon="history" label="Recientes" active={view === ViewState.RECENT} onClick={() => navigateTo(ViewState.RECENT)} />
+                <NavButton icon="checklist" label="Seleccionar" active={view === ViewState.SELECTION} onClick={() => navigateTo(ViewState.SELECTION)} />
                 {authMode === 'admin' && <NavButton icon="playlist_add" label="Producciones" active={view === ViewState.PRODUCTIONS} onClick={() => navigateTo(ViewState.PRODUCTIONS)} />}
                 {authMode === 'admin' && <NavButton icon="settings" label="Ajustes" active={view === ViewState.SETTINGS} onClick={() => navigateTo(ViewState.SETTINGS)} />}
             </nav>

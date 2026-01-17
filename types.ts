@@ -32,7 +32,7 @@ export enum ViewState {
   LIST = 'LIST',
   SETTINGS = 'SETTINGS',
   RESULTS = 'RESULTS',
-  RECENT = 'RECENT',
+  SELECTION = 'SELECTION',
   PRODUCTIONS = 'PRODUCTIONS'
 }
 
