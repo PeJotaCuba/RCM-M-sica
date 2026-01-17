@@ -35,10 +35,10 @@ const TrackDetail: React.FC<TrackDetailProps> = ({ track, authMode, onClose, onS
       });
   };
 
-  const handleSearchAppleMusic = () => {
-      // Abre Apple Music con la búsqueda del título y el intérprete (o autor)
-      const term = `${track.metadata.title} ${track.metadata.performer || track.metadata.author || ''}`;
-      const url = `https://music.apple.com/search?term=${encodeURIComponent(term)}`;
+  const handleSearchAuthor = () => {
+      // Fórmula: Título + Intérprete + "autor compositor"
+      const term = `${track.metadata.title || ''} ${track.metadata.performer || ''} autor compositor`;
+      const url = `https://www.google.com/search?q=${encodeURIComponent(term)}`;
       window.open(url, '_blank');
   };
 
@@ -138,14 +138,14 @@ const TrackDetail: React.FC<TrackDetailProps> = ({ track, authMode, onClose, onS
                     )}
                 </div>
 
-                {/* Apple Music Search Action */}
+                {/* Search Author Action */}
                 {!isEditing && (
                     <button 
-                        onClick={handleSearchAppleMusic}
-                        className="w-full mt-2 bg-gradient-to-r from-pink-500 to-red-500 text-white py-3.5 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 hover:opacity-90 transition-transform active:scale-95"
+                        onClick={handleSearchAuthor}
+                        className="w-full mt-2 bg-azul-header text-white py-3.5 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 hover:bg-opacity-90 transition-transform active:scale-95"
                     >
-                        <span className="material-symbols-outlined">music_note</span>
-                        Buscar en Apple Music
+                        <span className="material-symbols-outlined">search</span>
+                        Buscar autor (Google)
                     </button>
                 )}
             </div>

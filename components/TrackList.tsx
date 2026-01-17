@@ -16,6 +16,8 @@ interface TrackListProps {
   onToggleSelection?: (track: Track) => void;
   onDownloadReport?: () => void;
   isSelectionView?: boolean;
+  onClearSelection?: () => void;
+  onShareWhatsApp?: () => void;
 }
 
 const FIXED_ROOTS = ['Música 1', 'Música 2', 'Música 3', 'Música 4', 'Música 5', 'Otros'];
@@ -26,7 +28,8 @@ type SearchScope = 'global' | 'root';
 const TrackList: React.FC<TrackListProps> = ({ 
     tracks, onSelectTrack, onUploadTxt, isAdmin, 
     onSyncRoot, onExportRoot, onClearRoot,
-    selectedTrackIds, onToggleSelection, onDownloadReport, isSelectionView
+    selectedTrackIds, onToggleSelection, onDownloadReport, isSelectionView,
+    onClearSelection, onShareWhatsApp
 }) => {
   // Input State (Visual)
   const [inputValue, setInputValue] = useState('');
@@ -299,19 +302,43 @@ const TrackList: React.FC<TrackListProps> = ({
 
         {/* 1.5 Header for Selection View */}
         {isSelectionView && (
-             <div className="bg-white dark:bg-background-dark p-4 border-b border-gray-100 dark:border-gray-800 flex justify-between items-center">
-                 <div>
-                     <h2 className="text-lg font-bold text-primary">Canciones Seleccionadas</h2>
-                     <p className="text-xs text-gray-500">{tracks.length} elementos</p>
+             <div className="bg-white dark:bg-background-dark p-4 border-b border-gray-100 dark:border-gray-800 flex flex-col gap-3">
+                 <div className="flex justify-between items-center">
+                     <div>
+                         <h2 className="text-lg font-bold text-primary">Canciones Seleccionadas</h2>
+                         <p className="text-xs text-gray-500">{tracks.length} elementos</p>
+                     </div>
+                     {onClearSelection && tracks.length > 0 && (
+                         <button 
+                             onClick={onClearSelection}
+                             className="text-red-500 text-[10px] font-bold uppercase border border-red-200 px-2 py-1 rounded hover:bg-red-50"
+                         >
+                             Limpiar Lista
+                         </button>
+                     )}
                  </div>
-                 {onDownloadReport && tracks.length > 0 && (
-                     <button 
-                        onClick={onDownloadReport}
-                        className="bg-blue-600 text-white text-xs font-bold py-2 px-4 rounded-full flex items-center gap-1 hover:bg-blue-700"
-                     >
-                         <span className="material-symbols-outlined text-sm">download</span>
-                         Descargar DOCX
-                     </button>
+                 
+                 {tracks.length > 0 && (
+                    <div className="flex gap-2">
+                        {onDownloadReport && (
+                            <button 
+                                onClick={onDownloadReport}
+                                className="flex-1 bg-blue-600 text-white text-xs font-bold py-2.5 px-4 rounded-lg flex items-center justify-center gap-1 hover:bg-blue-700 shadow-sm"
+                            >
+                                <span className="material-symbols-outlined text-sm">download</span>
+                                DOCX
+                            </button>
+                        )}
+                        {onShareWhatsApp && (
+                            <button 
+                                onClick={onShareWhatsApp}
+                                className="flex-1 bg-[#25D366] text-white text-xs font-bold py-2.5 px-4 rounded-lg flex items-center justify-center gap-1 hover:bg-[#20bd5a] shadow-sm"
+                            >
+                                <span className="material-symbols-outlined text-sm">share</span>
+                                WhatsApp
+                            </button>
+                        )}
+                    </div>
                  )}
              </div>
         )}
@@ -501,10 +528,10 @@ const TrackList: React.FC<TrackListProps> = ({
                                 e.stopPropagation();
                                 onToggleSelection(item.data);
                             }}
-                            className={`size-8 rounded-full flex items-center justify-center transition-all ${selectedTrackIds?.has(item.data.id) ? 'bg-primary text-white' : 'bg-gray-100 dark:bg-white/10 text-gray-300 dark:text-gray-600 hover:bg-gray-200'}`}
+                            className={`size-8 rounded-full flex items-center justify-center transition-all ${selectedTrackIds?.has(item.data.id) ? (isSelectionView ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-primary text-white') : 'bg-gray-100 dark:bg-white/10 text-gray-300 dark:text-gray-600 hover:bg-gray-200'}`}
                         >
                             <span className="material-symbols-outlined text-lg">
-                                {selectedTrackIds?.has(item.data.id) ? 'check' : 'add'}
+                                {isSelectionView ? 'delete' : (selectedTrackIds?.has(item.data.id) ? 'check' : 'add')}
                             </span>
                         </button>
                     )}

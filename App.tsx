@@ -335,6 +335,28 @@ const App: React.FC = () => {
       });
   };
 
+  const handleClearSelection = () => {
+      if (selectedTracksList.length === 0) return;
+      if (window.confirm('¿Desea limpiar toda la lista de selección?')) {
+          setSelectedTracksList([]);
+      }
+  };
+
+  const handleShareWhatsApp = () => {
+      if (selectedTracksList.length === 0) return;
+      
+      const today = new Date().toISOString().split('T')[0];
+      let message = `*SELECCIÓN MUSICAL RCM - ${today}*\n\n`;
+      
+      selectedTracksList.forEach(t => {
+          message += `🎵 ${t.metadata.title || t.filename}\n`;
+          message += `👤 ${t.metadata.performer || t.metadata.author || 'Desconocido'}\n\n`;
+      });
+
+      const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
+      window.open(url, '_blank');
+  };
+
   const handleGenerateSelectionReport = async () => {
       if (selectedTracksList.length === 0) {
           alert("No hay canciones seleccionadas para generar el reporte.");
@@ -502,6 +524,8 @@ const App: React.FC = () => {
                         onToggleSelection={handleToggleSelection}
                         onDownloadReport={handleGenerateSelectionReport}
                         isSelectionView={true}
+                        onClearSelection={handleClearSelection}
+                        onShareWhatsApp={handleShareWhatsApp}
                     />
                 </div>
             )}
