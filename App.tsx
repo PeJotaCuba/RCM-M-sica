@@ -317,6 +317,92 @@ const App: React.FC = () => {
       reader.readAsText(file);
   };
 
+  // --- BULK SELECTION LOGIC VIA TXT ---
+  const handleBulkSelectTxt = (file: File) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+          const text = e.target?.result;
+          if (typeof text === 'string') {
+              // Parse the TXT input into objects
+              const queries = [];
+              const lines = text.split('\n');
+              let currentQuery: any = {};
+              
+              for (const line of lines) {
+                  const trimmed = line.trim();
+                  if (!trimmed) continue;
+                  
+                  const lower = trimmed.toLowerCase();
+                  if (lower.startsWith('título:') || lower.startsWith('titulo:')) {
+                      if (currentQuery.title) queries.push(currentQuery); // Push prev if exists
+                      currentQuery = { title: trimmed.split(':')[1].trim() };
+                  } else if (lower.startsWith('intérprete:') || lower.startsWith('interprete:')) {
+                      currentQuery.performer = trimmed.split(':')[1].trim();
+                  } else if (lower.startsWith('autor:')) {
+                      currentQuery.author = trimmed.split(':')[1].trim();
+                  }
+              }
+              if (currentQuery.title) queries.push(currentQuery);
+
+              if (queries.length === 0) return alert("No se encontraron criterios de búsqueda en el TXT.");
+
+              // Search Logic (Triangulation)
+              let foundCount = 0;
+              const newSelection = [...selectedTracksList];
+              const normalize = (s: string) => s ? s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim() : "";
+
+              queries.forEach(q => {
+                  const qTitle = normalize(q.title);
+                  const qPerf = normalize(q.performer);
+                  const qAuth = normalize(q.author);
+
+                  if (!qTitle && !qPerf && !qAuth) return;
+
+                  let bestMatch: Track | null = null;
+                  let maxScore = 0;
+
+                  tracks.forEach(t => {
+                      let score = 0;
+                      const tTitle = normalize(t.metadata.title || t.filename);
+                      const tPerf = normalize(t.metadata.performer);
+                      const tAuth = normalize(t.metadata.author);
+
+                      // Scoring
+                      if (qTitle && tTitle.includes(qTitle)) score += 10;
+                      if (qTitle && tTitle === qTitle) score += 5; // Bonus exact match
+                      if (qPerf && tPerf.includes(qPerf)) score += 5;
+                      if (qAuth && tAuth.includes(qAuth)) score += 5;
+
+                      // Fallback: If title missing in query, rely heavily on performer+author match
+                      if (!qTitle) {
+                          if (qPerf && tPerf.includes(qPerf)) score += 5;
+                          if (qAuth && tAuth.includes(qAuth)) score += 5;
+                      }
+
+                      if (score > maxScore) {
+                          maxScore = score;
+                          bestMatch = t;
+                      }
+                  });
+
+                  // Threshold for acceptance
+                  if (bestMatch && maxScore >= 10) { // At least a title partial match or double field match
+                      // Avoid duplicates
+                      if (!newSelection.find(s => s.id === (bestMatch as Track).id)) {
+                          newSelection.push(bestMatch);
+                          foundCount++;
+                      }
+                  }
+              });
+
+              setSelectedTracksList(newSelection);
+              alert(`Se encontraron y agregaron ${foundCount} coincidencias a la selección.`);
+          }
+      };
+      reader.readAsText(file);
+  };
+  // ------------------------------------
+
   const handleSelectTrack = (track: Track) => {
     setSelectedTrack(track);
     // Push state so back button closes it
@@ -349,8 +435,10 @@ const App: React.FC = () => {
       let message = `*SELECCIÓN MUSICAL RCM - ${today}*\n\n`;
       
       selectedTracksList.forEach(t => {
+          const root = t.path.split('/')[0] || 'Desconocido';
           message += `🎵 ${t.metadata.title || t.filename}\n`;
-          message += `👤 ${t.metadata.performer || t.metadata.author || 'Desconocido'}\n\n`;
+          message += `👤 ${t.metadata.performer || 'Desconocido'}\n`;
+          message += `📂 ${root}\n\n`;
       });
 
       const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
@@ -516,6 +604,7 @@ const App: React.FC = () => {
                         tracks={selectedTracksList} 
                         onSelectTrack={handleSelectTrack} 
                         onUploadTxt={() => {}} 
+                        onBulkSelectTxt={handleBulkSelectTxt}
                         isAdmin={false} 
                         onSyncRoot={() => {}} 
                         onExportRoot={() => {}} 

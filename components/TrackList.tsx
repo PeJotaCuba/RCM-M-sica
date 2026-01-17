@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Track } from '../types';
 
 interface TrackListProps {
@@ -18,6 +18,7 @@ interface TrackListProps {
   isSelectionView?: boolean;
   onClearSelection?: () => void;
   onShareWhatsApp?: () => void;
+  onBulkSelectTxt?: (file: File) => void; // New prop for bulk selection
 }
 
 const FIXED_ROOTS = ['Música 1', 'Música 2', 'Música 3', 'Música 4', 'Música 5', 'Otros'];
@@ -29,7 +30,7 @@ const TrackList: React.FC<TrackListProps> = ({
     tracks, onSelectTrack, onUploadTxt, isAdmin, 
     onSyncRoot, onExportRoot, onClearRoot,
     selectedTrackIds, onToggleSelection, onDownloadReport, isSelectionView,
-    onClearSelection, onShareWhatsApp
+    onClearSelection, onShareWhatsApp, onBulkSelectTxt
 }) => {
   // Input State (Visual)
   const [inputValue, setInputValue] = useState('');
@@ -44,6 +45,9 @@ const TrackList: React.FC<TrackListProps> = ({
 
   // Pagination State (To prevent rendering freezing)
   const [renderLimit, setRenderLimit] = useState(ITEMS_PER_PAGE);
+
+  // Scroll ref for tabs
+  const tabsContainerRef = useRef<HTMLDivElement>(null);
 
   // Debounce Effect: Updates search query only after user stops typing for 300ms
   useEffect(() => {
@@ -115,6 +119,7 @@ const TrackList: React.FC<TrackListProps> = ({
           setActiveRoot(matchingFixedRoot);
       }
       
+      // Clear search when opening a folder from results
       setInputValue('');
       setSearchQuery('');
   };
@@ -125,12 +130,29 @@ const TrackList: React.FC<TrackListProps> = ({
       }
   };
 
+  const handleBulkFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (e.target.files && e.target.files[0] && onBulkSelectTxt) {
+          onBulkSelectTxt(e.target.files[0]);
+          e.target.value = ''; // Reset
+      }
+  };
+
   const handleLoadMore = () => {
       setRenderLimit(prev => prev + ITEMS_PER_PAGE);
   };
 
   const toggleSearchScope = () => {
       setSearchScope(prev => prev === 'global' ? 'root' : 'global');
+  };
+
+  const scrollTabs = (direction: 'left' | 'right') => {
+      if (tabsContainerRef.current) {
+          const scrollAmount = 150;
+          tabsContainerRef.current.scrollBy({
+              left: direction === 'left' ? -scrollAmount : scrollAmount,
+              behavior: 'smooth'
+          });
+      }
   };
 
   const normalizeStr = (str: string) => str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -284,19 +306,37 @@ const TrackList: React.FC<TrackListProps> = ({
         
         {/* 1. FIXED TABS (Hide in Selection View or Search) */}
         {!inputValue && !isSelectionView && (
-            <div className="flex w-full overflow-x-auto no-scrollbar bg-azul-header text-white">
-                {FIXED_ROOTS.map(root => (
-                    <button 
-                        key={root}
-                        onClick={() => handleRootChange(root)} 
-                        className={`flex-1 min-w-[90px] py-4 text-[11px] sm:text-xs font-bold uppercase tracking-wider transition-colors relative ${activeRoot === root ? 'bg-white/10 text-white' : 'text-gray-300 hover:bg-white/5'}`}
-                    >
-                        {root}
-                        {activeRoot === root && (
-                            <div className="absolute bottom-0 left-0 w-full h-1 bg-miel"></div>
-                        )}
-                    </button>
-                ))}
+            <div className="relative group bg-azul-header">
+                {/* Left Arrow */}
+                <button 
+                    onClick={() => scrollTabs('left')}
+                    className="absolute left-0 top-0 bottom-0 z-10 px-1 bg-gradient-to-r from-azul-header to-transparent text-white/70 hover:text-white flex items-center"
+                >
+                    <span className="material-symbols-outlined text-sm">chevron_left</span>
+                </button>
+
+                <div ref={tabsContainerRef} className="flex w-full overflow-x-auto no-scrollbar scroll-smooth px-6">
+                    {FIXED_ROOTS.map(root => (
+                        <button 
+                            key={root}
+                            onClick={() => handleRootChange(root)} 
+                            className={`flex-none min-w-[90px] py-4 text-[11px] sm:text-xs font-bold uppercase tracking-wider transition-colors relative ${activeRoot === root ? 'bg-white/10 text-white' : 'text-gray-300 hover:bg-white/5'}`}
+                        >
+                            {root}
+                            {activeRoot === root && (
+                                <div className="absolute bottom-0 left-0 w-full h-1 bg-miel"></div>
+                            )}
+                        </button>
+                    ))}
+                </div>
+
+                {/* Right Arrow */}
+                 <button 
+                    onClick={() => scrollTabs('right')}
+                    className="absolute right-0 top-0 bottom-0 z-10 px-1 bg-gradient-to-l from-azul-header to-transparent text-white/70 hover:text-white flex items-center"
+                >
+                    <span className="material-symbols-outlined text-sm">chevron_right</span>
+                </button>
             </div>
         )}
 
@@ -308,14 +348,23 @@ const TrackList: React.FC<TrackListProps> = ({
                          <h2 className="text-lg font-bold text-primary">Canciones Seleccionadas</h2>
                          <p className="text-xs text-gray-500">{tracks.length} elementos</p>
                      </div>
-                     {onClearSelection && tracks.length > 0 && (
-                         <button 
-                             onClick={onClearSelection}
-                             className="text-red-500 text-[10px] font-bold uppercase border border-red-200 px-2 py-1 rounded hover:bg-red-50"
-                         >
-                             Limpiar Lista
-                         </button>
-                     )}
+                     <div className="flex gap-2">
+                        {onBulkSelectTxt && (
+                            <label className="text-primary text-[10px] font-bold uppercase border border-primary/30 px-2 py-1 rounded hover:bg-primary/5 cursor-pointer flex items-center gap-1">
+                                <span className="material-symbols-outlined text-sm">upload_file</span>
+                                Cargar TXT
+                                <input type="file" accept=".txt" onChange={handleBulkFileChange} className="hidden" />
+                            </label>
+                        )}
+                        {onClearSelection && tracks.length > 0 && (
+                             <button 
+                                 onClick={onClearSelection}
+                                 className="text-red-500 text-[10px] font-bold uppercase border border-red-200 px-2 py-1 rounded hover:bg-red-50"
+                             >
+                                 Limpiar Lista
+                             </button>
+                         )}
+                     </div>
                  </div>
                  
                  {tracks.length > 0 && (
