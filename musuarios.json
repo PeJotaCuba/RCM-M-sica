@@ -1,0 +1,16 @@
+[
+  {
+    "username": "admin",
+    "password": "RCMM26",
+    "role": "admin",
+    "fullName": "Pedro José Reyes Acuña",
+    "phone": "54413935"
+  },
+  {
+    "username": "Lissell",
+    "password": "RadioCiudad06",
+    "role": "guest",
+    "fullName": "Lissell Fontelo Danta",
+    "phone": "58841705"
+  }
+]
