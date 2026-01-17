@@ -361,85 +361,120 @@ const App: React.FC = () => {
       reader.readAsText(file);
   };
 
-  // --- CORE SEARCH LOGIC (Used by TXT and Wishlist) ---
-  const performBulkSearch = (text: string) => {
-      const queries: { title?: string, performer?: string, author?: string, raw: string }[] = [];
-      const lines = text.split('\n');
-      let currentQuery: any = {};
-      let hasStructuredData = false;
-      
-      for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed) continue;
-          
-          const lower = trimmed.toLowerCase();
-          
-          if (lower.startsWith('título:') || lower.startsWith('titulo:')) {
-              hasStructuredData = true;
-              if (currentQuery.title) {
-                   queries.push({...currentQuery, raw: currentQuery.title}); 
-              }
-              currentQuery = { title: trimmed.split(':')[1].trim() };
-          } else if (lower.startsWith('intérprete:') || lower.startsWith('interprete:')) {
-              currentQuery.performer = trimmed.split(':')[1].trim();
-          } else if (lower.startsWith('autor:')) {
-              currentQuery.author = trimmed.split(':')[1].trim();
-          } else if (!hasStructuredData) {
-              queries.push({ title: trimmed, raw: trimmed });
-          }
-      }
-      if (currentQuery.title) queries.push({...currentQuery, raw: currentQuery.title});
+  // --- CORE SEARCH LOGIC (Revised: Strict Word Matching + Phonetic Flexibility) ---
+  
+  // 1. Phonetic/Orthographic Normalizer
+  // Targets: Accents, B/V, S/Z/C, H mute, LL/Y, Double Letters
+  const normalizeFlexible = (text: string) => {
+      if (!text) return "";
+      let s = text.toLowerCase()
+          .normalize("NFD").replace(/[\u0300-\u036f]/g, ""); // Tildes y diacríticos
 
-      if (queries.length === 0) return alert("No se encontraron criterios de búsqueda.");
+      // Simplificación Fonética Estricta para Búsqueda
+      s = s.replace(/v/g, 'b'); // v -> b
+      s = s.replace(/z/g, 's'); // z -> s
+      s = s.replace(/ce/g, 'se').replace(/ci/g, 'si'); // ce, ci -> se, si
+      s = s.replace(/qu/g, 'k'); // qu -> k
+      s = s.replace(/k/g, 'c');  // k -> c (unifica sonido fuerte)
+      s = s.replace(/ll/g, 'y'); // ll -> y
+      s = s.replace(/i/g, 'y');  // i -> y (para uniformar vocales/consonantes sonoras similares)
+      s = s.replace(/h/g, '');   // h -> (muda)
+      s = s.replace(/ñ/g, 'n');  // ñ -> n
+
+      // Reducción de letras dobles (rr -> r, mm -> m, ss -> s, etc)
+      s = s.replace(/([a-z])\1+/g, '$1');
+
+      // Eliminar caracteres no alfanuméricos (mantener espacios para separar palabras)
+      s = s.replace(/[^a-z0-9\s]/g, '');
+      
+      return s.trim();
+  };
+
+  // 2. Tokenizer: Split into words, remove tiny meaningless words
+  const getTokens = (text: string) => {
+      const normalized = normalizeFlexible(text);
+      return normalized.split(/\s+/).filter(t => t.length > 1); // Ignorar letras sueltas
+  };
+
+  const performBulkSearch = (text: string) => {
+      const lines = text.split('\n').map(l => l.trim()).filter(l => l);
+      if (lines.length === 0) return alert("No se encontraron criterios de búsqueda.");
+
+      const queries = lines.map(line => {
+          // Detect manual format "Title - Performer" or explicit keys
+          const lower = line.toLowerCase();
+          if (lower.startsWith('titulo:')) {
+              return { title: line.split(':')[1].trim(), raw: line };
+          }
+          // Simple heuristic: "Title - Performer" or just "Title"
+          if (line.includes('-')) {
+              const parts = line.split('-');
+              if (parts.length >= 2) {
+                  return { title: parts[0].trim(), performer: parts[1].trim(), raw: line };
+              }
+          }
+          return { title: line, raw: line };
+      });
 
       let foundCount = 0;
       const newSelection = [...selectedTracksList];
-      const normalize = (s: string) => s ? s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim() : "";
       const notFoundList: string[] = [];
 
       queries.forEach(q => {
-          const qTitle = normalize(q.title || "");
-          const qPerf = normalize(q.performer || "");
-          const qAuth = normalize(q.author || "");
-
-          if (!qTitle && !qPerf && !qAuth) return;
+          // Prepare query tokens
+          const qTitleTokens = getTokens(q.title || "");
+          const qPerfTokens = getTokens(q.performer || "");
+          
+          // Should have at least one valid token to search
+          if (qTitleTokens.length === 0 && qPerfTokens.length === 0) return;
 
           let bestMatch: Track | null = null;
-          let maxScore = 0;
+          // Boolean match: We want FULL WORDS found, not partial substrings
+          // We iterate all tracks (can be slow for huge DB, but safe for 50 items wishlist)
 
-          tracks.forEach(t => {
-              let score = 0;
-              const tTitle = normalize(t.metadata.title || t.filename);
-              const tPerf = normalize(t.metadata.performer || "");
-              const tAuth = normalize(t.metadata.author || "");
-
-              // Scoring
-              if (qTitle && tTitle.includes(qTitle)) score += 10;
-              if (qTitle && tTitle === qTitle) score += 5; 
-              if (qPerf && tPerf.includes(qPerf)) score += 5;
-              if (qAuth && tAuth.includes(qAuth)) score += 5;
-
-              // Fallback logic for unstructured lines (e.g. "Song Name Artist")
-              if (!qPerf && !qAuth && q.raw) {
-                   const rawNorm = normalize(q.raw);
-                   if (tTitle.includes(rawNorm)) score += 10;
-                   if (rawNorm.includes(tTitle) && tPerf && rawNorm.includes(tPerf)) score += 15; 
+          // Optimization: Pre-filter? No, we need flexible match.
+          
+          for (const t of tracks) {
+              const tTitleTokens = getTokens(t.metadata.title || t.filename);
+              const tPerfTokens = getTokens(t.metadata.performer || "");
+              
+              // Logic: 
+              // 1. If Query has Title, ALL significant title tokens must exist in Track Title tokens.
+              // 2. If Query has Performer, ALL significant performer tokens must exist in Track Performer tokens.
+              
+              let titleMatch = false;
+              if (qTitleTokens.length > 0) {
+                  // Check if every token in query title exists in track title
+                  const allTokensFound = qTitleTokens.every(qt => tTitleTokens.includes(qt));
+                  if (allTokensFound) titleMatch = true;
+              } else {
+                  // No title provided? Assume true if performer matches (rare case in wishlist)
+                  titleMatch = true; 
               }
 
-              if (score > maxScore) {
-                  maxScore = score;
+              let perfMatch = false;
+              if (q.performer && qPerfTokens.length > 0) {
+                  const allPerfFound = qPerfTokens.every(qp => tPerfTokens.includes(qp));
+                  if (allPerfFound) perfMatch = true;
+              } else {
+                  // If no performer specified, we don't enforce it
+                  perfMatch = true;
+              }
+
+              if (titleMatch && perfMatch) {
                   bestMatch = t;
+                  break; // Found a solid match, stop looking for this query
               }
-          });
+          }
 
-          // Threshold
-          if (bestMatch && maxScore >= 10) { 
+          if (bestMatch) {
+              // Avoid duplicates
               if (!newSelection.find(s => s.id === (bestMatch as Track).id)) {
                   newSelection.push(bestMatch);
                   foundCount++;
               }
           } else {
-              notFoundList.push(q.raw || q.title || "Desconocido");
+              notFoundList.push(q.raw);
           }
       });
 
@@ -447,8 +482,8 @@ const App: React.FC = () => {
       setMissingQueries(notFoundList);
 
       if (foundCount > 0 || notFoundList.length > 0) {
-          const msg = `Búsqueda completada.\nEncontrados: ${foundCount}\nNo encontrados: ${notFoundList.length}`;
-          // Optional: alert(msg); 
+          // Feedback message
+          // alert(`Búsqueda completada.\nEncontrados: ${foundCount}\nNo encontrados: ${notFoundList.length}`);
       }
   };
 
