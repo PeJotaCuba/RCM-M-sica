@@ -341,13 +341,26 @@ const App: React.FC = () => {
           return;
       }
 
+      // Generar contador diario
+      const today = new Date().toISOString().split('T')[0];
+      const storedDate = localStorage.getItem('rcm_daily_date');
+      let count = 1;
+
+      if (storedDate === today) {
+          const storedCount = localStorage.getItem('rcm_daily_count');
+          count = storedCount ? parseInt(storedCount) + 1 : 1;
+      }
+
+      localStorage.setItem('rcm_daily_date', today);
+      localStorage.setItem('rcm_daily_count', count.toString());
+
       const rows = selectedTracksList.map(t => 
           new docx.TableRow({
               children: [
                   new docx.TableCell({ children: [new docx.Paragraph(t.metadata.title || "Desconocido")] }),
                   new docx.TableCell({ children: [new docx.Paragraph(t.metadata.author || "Desconocido")] }),
                   new docx.TableCell({ children: [new docx.Paragraph(t.metadata.performer || "Desconocido")] }),
-                  new docx.TableCell({ children: [new docx.Paragraph(t.metadata.year || "")] }),
+                  new docx.TableCell({ children: [new docx.Paragraph(t.path || "")] }), // Changed Year to Path
               ]
           })
       );
@@ -365,7 +378,7 @@ const App: React.FC = () => {
                       width: { size: 100, type: docx.WidthType.PERCENTAGE },
                       rows: [
                           new docx.TableRow({
-                              children: ["Título", "Autor", "Intérprete", "Año"].map(t => 
+                              children: ["Título", "Autor", "Intérprete", "Ruta"].map(t => 
                                   new docx.TableCell({ 
                                       children: [new docx.Paragraph({text: t, bold: true})],
                                       shading: { fill: "EEEEEE" }
@@ -383,7 +396,8 @@ const App: React.FC = () => {
           const url = window.URL.createObjectURL(blob);
           const a = document.createElement("a");
           a.href = url;
-          a.download = `Reporte_Seleccion_${new Date().toISOString().split('T')[0]}.docx`;
+          // Filename format: Selección Musical + Fecha + Número de descarga del día
+          a.download = `Selección Musical ${today} ${count}.docx`;
           a.click();
           window.URL.revokeObjectURL(url);
       });

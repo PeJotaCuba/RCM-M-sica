@@ -1,13 +1,9 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { CreditInfo } from "../types";
 
 export const fetchCreditsFromGemini = async (filename: string, path: string): Promise<CreditInfo> => {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) {
-    throw new Error("Clave API no encontrada");
-  }
-
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   // Prompt translated to Spanish to maintain consistency and context for "RCM Música"
   const prompt = `
