@@ -68,6 +68,7 @@ const App: React.FC = () => {
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportItems, setExportItems] = useState<ExportItem[]>([]);
   const [programName, setProgramName] = useState('');
+  const [showAdminWhatsAppButton, setShowAdminWhatsAppButton] = useState(false);
 
   const [foundCredits, setFoundCredits] = useState<CreditInfo | null>(null);
   const [isSearching, setIsSearching] = useState(false);
@@ -281,7 +282,6 @@ const App: React.FC = () => {
   };
 
   // --- BULK SEARCH ---
-  // Same logic as before
   const normalizeFlexible = (text: string) => {
       if (!text) return "";
       let s = text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -396,6 +396,7 @@ const App: React.FC = () => {
       });
 
       setExportItems(items);
+      setShowAdminWhatsAppButton(false); // Reset button state
       setShowExportModal(true);
   };
 
@@ -421,8 +422,8 @@ const App: React.FC = () => {
       window.open(url, '_blank');
   };
 
-  // 2. Send Report (Admin TXT)
-  const handleSendReport = () => {
+  // 2. Send Report Step 1: Download
+  const handleDownloadReport = () => {
       if (!currentUser) return;
       const today = new Date().toISOString().split('T')[0];
       
@@ -458,7 +459,12 @@ const App: React.FC = () => {
       window.URL.revokeObjectURL(url);
       a.remove();
 
-      // Open WhatsApp with Admin Number
+      // Switch button to "Send to Admin"
+      setShowAdminWhatsAppButton(true);
+  };
+
+  // 3. Send Report Step 2: Open WhatsApp
+  const handleSendWhatsAppToAdmin = () => {
       const msg = `Hola, envío el reporte de créditos del programa "${programName}".\nAdjunto archivo TXT firmado.`;
       const waUrl = `https://wa.me/${ADMIN_PHONE}?text=${encodeURIComponent(msg)}`;
       window.open(waUrl, '_blank');
@@ -645,14 +651,26 @@ const App: React.FC = () => {
                             <span>Compartir Créditos</span>
                             <span className="text-[9px] font-normal opacity-80">(WhatsApp General)</span>
                         </button>
-                         <button 
-                            onClick={handleSendReport}
-                            className="bg-azul-header text-white py-3 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-1 hover:brightness-95"
-                        >
-                            <span className="material-symbols-outlined text-lg">admin_panel_settings</span> 
-                            <span>Mandar Reporte</span>
-                            <span className="text-[9px] font-normal opacity-80">(TXT a Admin)</span>
-                        </button>
+                         
+                         {!showAdminWhatsAppButton ? (
+                             <button 
+                                onClick={handleDownloadReport}
+                                className="bg-azul-header text-white py-3 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-1 hover:brightness-95"
+                            >
+                                <span className="material-symbols-outlined text-lg">download</span> 
+                                <span>Descargar Reporte</span>
+                                <span className="text-[9px] font-normal opacity-80">(TXT a Admin)</span>
+                            </button>
+                         ) : (
+                             <button 
+                                onClick={handleSendWhatsAppToAdmin}
+                                className="bg-miel text-white py-3 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-1 hover:brightness-95 animate-pulse"
+                            >
+                                <span className="material-symbols-outlined text-lg">send</span> 
+                                <span>Enviar a Admin</span>
+                                <span className="text-[9px] font-normal opacity-80">(WhatsApp)</span>
+                            </button>
+                         )}
                     </div>
                 </div>
             </div>
