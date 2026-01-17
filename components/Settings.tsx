@@ -26,15 +26,23 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
   const [showPassword, setShowPassword] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
 
-  // Helper to generate Unique ID (Uppercase Letters + Numbers)
+  // Helper to generate Unique ID (> 20 chars)
+  // Format: RCM-[NAME_SANITIZED]-[RANDOM_STRING]
   const generateUniqueId = (name: string) => {
-      const initials = name ? name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 3) : 'USR';
+      // 1. Clean name (remove spaces, special chars), uppercase, max 10 chars
+      const cleanName = name ? name.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().substring(0, 10) : 'USR';
+      
+      // 2. Generate Random String
       const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
       let random = '';
-      for (let i = 0; i < 5; i++) {
+      // Ensure total length is always > 20. 
+      // Prefix (4) + Name (max 10) + Hyphens (2) = ~16 chars used. 
+      // Adding 16 random chars ensures safely > 25 chars total.
+      for (let i = 0; i < 16; i++) {
           random += chars.charAt(Math.floor(Math.random() * chars.length));
       }
-      return `${initials}-${random}`;
+      
+      return `RCM-${cleanName}-${random}`;
   };
 
   // --- STATS DOWNLOAD (2 SHEETS) ---

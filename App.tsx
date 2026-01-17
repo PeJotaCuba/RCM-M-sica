@@ -35,7 +35,7 @@ const DEFAULT_ADMIN: User = {
     role: 'admin',
     fullName: 'Administrador Principal',
     phone: '55555555',
-    uniqueId: 'ADMIN-001'
+    uniqueId: 'RCM-ADMIN-X9Y8Z7A6B5C4'
 };
 
 interface ExportItem {
@@ -68,22 +68,21 @@ const App: React.FC = () => {
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportItems, setExportItems] = useState<ExportItem[]>([]);
   const [programName, setProgramName] = useState('');
-  const [showAdminWhatsAppButton, setShowAdminWhatsAppButton] = useState(false);
 
   const [foundCredits, setFoundCredits] = useState<CreditInfo | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  // ID Generator (Name based + Random)
+  // ID Generator (> 20 chars, RCM prefix)
   const generateUniqueId = (name: string) => {
-      const initials = name ? name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 3) : 'USR';
+      const cleanName = name ? name.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().substring(0, 10) : 'USR';
       const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
       let random = '';
-      for (let i = 0; i < 5; i++) {
+      for (let i = 0; i < 16; i++) {
           random += chars.charAt(Math.floor(Math.random() * chars.length));
       }
-      return `${initials}-${random}`;
+      return `RCM-${cleanName}-${random}`;
   };
 
   useEffect(() => {
@@ -396,7 +395,6 @@ const App: React.FC = () => {
       });
 
       setExportItems(items);
-      setShowAdminWhatsAppButton(false); // Reset button state
       setShowExportModal(true);
   };
 
@@ -431,22 +429,22 @@ const App: React.FC = () => {
       let content = `REPORTE OFICIAL DE CRÉDITOS RCM\n`;
       content += `===================================\n`;
       content += `Usuario: ${currentUser.fullName}\n`; 
-      content += `Firma Digital: ${currentUser.uniqueId}\n`;
       content += `Fecha: ${today}\n`;
       content += `Programa: ${programName || 'Sin Especificar'}\n`;
       content += `===================================\n\n`;
 
       exportItems.forEach((item, idx) => {
-          content += `[${idx + 1}] Título: ${item.title}\n`;
-          content += `    Autor: ${item.author || '---'} (${item.authorCountry || '---'})\n`;
-          content += `    Intérprete: ${item.performer || '---'} (${item.performerCountry || '---'})\n`;
-          content += `    Género: ${item.genre || '---'}\n`;
-          content += `    Estado: ${item.source === 'db' ? 'En BD' : 'NO EN BD'}\n`;
+          content += `[${idx + 1}]\n`;
+          content += `Titulo: ${item.title}\n`;
+          content += `Autor: ${item.author || '---'}\n`;
+          content += `Pais del autor: ${item.authorCountry || '---'}\n`;
+          content += `Interprete: ${item.performer || '---'}\n`;
+          content += `Pais del interprete: ${item.performerCountry || '---'}\n`;
+          content += `Genero: ${item.genre || '---'}\n`;
           content += `-----------------------------------\n`;
       });
 
-      content += `\nFirma Digital de Validación: ${currentUser.uniqueId}\n`;
-      content += `Fin del reporte.\n`;
+      content += `\nFIRMA DIGITAL: ${currentUser.uniqueId}\n`;
 
       // Create Blob (Text)
       const blob = new Blob([content], { type: 'text/plain' });
@@ -458,16 +456,6 @@ const App: React.FC = () => {
       a.click();
       window.URL.revokeObjectURL(url);
       a.remove();
-
-      // Switch button to "Send to Admin"
-      setShowAdminWhatsAppButton(true);
-  };
-
-  // 3. Send Report Step 2: Open WhatsApp
-  const handleSendWhatsAppToAdmin = () => {
-      const msg = `Hola, envío el reporte de créditos del programa "${programName}".\nAdjunto archivo TXT firmado.`;
-      const waUrl = `https://wa.me/${ADMIN_PHONE}?text=${encodeURIComponent(msg)}`;
-      window.open(waUrl, '_blank');
   };
 
   const handleApplyCredits = (newCredits: CreditInfo) => {
@@ -652,25 +640,14 @@ const App: React.FC = () => {
                             <span className="text-[9px] font-normal opacity-80">(WhatsApp General)</span>
                         </button>
                          
-                         {!showAdminWhatsAppButton ? (
-                             <button 
-                                onClick={handleDownloadReport}
-                                className="bg-azul-header text-white py-3 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-1 hover:brightness-95"
-                            >
-                                <span className="material-symbols-outlined text-lg">download</span> 
-                                <span>Descargar Reporte</span>
-                                <span className="text-[9px] font-normal opacity-80">(TXT a Admin)</span>
-                            </button>
-                         ) : (
-                             <button 
-                                onClick={handleSendWhatsAppToAdmin}
-                                className="bg-miel text-white py-3 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-1 hover:brightness-95 animate-pulse"
-                            >
-                                <span className="material-symbols-outlined text-lg">send</span> 
-                                <span>Enviar a Admin</span>
-                                <span className="text-[9px] font-normal opacity-80">(WhatsApp)</span>
-                            </button>
-                         )}
+                         <button 
+                            onClick={handleDownloadReport}
+                            className="bg-azul-header text-white py-3 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-1 hover:brightness-95"
+                        >
+                            <span className="material-symbols-outlined text-lg">download</span> 
+                            <span>Descargar Reporte</span>
+                            <span className="text-[9px] font-normal opacity-80">(TXT a Admin)</span>
+                        </button>
                     </div>
                 </div>
             </div>
