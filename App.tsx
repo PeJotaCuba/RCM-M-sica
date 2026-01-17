@@ -54,6 +54,11 @@ const App: React.FC = () => {
   // NEW: Manual Selection List (replaces recents)
   const [selectedTracksList, setSelectedTracksList] = useState<Track[]>([]);
 
+  // Wishlist & Bulk Search State
+  const [showWishlist, setShowWishlist] = useState(false);
+  const [missingQueries, setMissingQueries] = useState<string[]>([]);
+  const [wishlistText, setWishlistText] = useState('');
+
   // Search State
   const [foundCredits, setFoundCredits] = useState<CreditInfo | null>(null);
   const [isSearching, setIsSearching] = useState(false);
@@ -66,9 +71,13 @@ const App: React.FC = () => {
     if (view === ViewState.LOGIN) return;
 
     const handlePopState = (event: PopStateEvent) => {
-        // Priority 1: Close Modal
+        // Priority 1: Close Modal or Wishlist
         if (selectedTrack) {
             setSelectedTrack(null);
+            return;
+        }
+        if (showWishlist) {
+            setShowWishlist(false);
             return;
         }
 
@@ -88,7 +97,7 @@ const App: React.FC = () => {
     return () => {
         window.removeEventListener('popstate', handlePopState);
     };
-  }, [selectedTrack, view]);
+  }, [selectedTrack, view, showWishlist]);
 
 
   // Helper to save tracks (Optimized for IndexedDB)
@@ -317,95 +326,126 @@ const App: React.FC = () => {
       reader.readAsText(file);
   };
 
-  // --- BULK SELECTION LOGIC VIA TXT ---
+  // --- CORE SEARCH LOGIC (Used by TXT and Wishlist) ---
+  const performBulkSearch = (text: string) => {
+      const queries: { title?: string, performer?: string, author?: string, raw: string }[] = [];
+      const lines = text.split('\n');
+      let currentQuery: any = {};
+      let hasStructuredData = false;
+      
+      // First Pass: Try to parse structured data (Título:, etc.)
+      // If structured keys are found, we follow that logic.
+      // If lines are simple text, we treat them as Title/Raw search.
+      
+      for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          
+          const lower = trimmed.toLowerCase();
+          
+          if (lower.startsWith('título:') || lower.startsWith('titulo:')) {
+              hasStructuredData = true;
+              if (currentQuery.title) {
+                   queries.push({...currentQuery, raw: currentQuery.title}); 
+              }
+              currentQuery = { title: trimmed.split(':')[1].trim() };
+          } else if (lower.startsWith('intérprete:') || lower.startsWith('interprete:')) {
+              currentQuery.performer = trimmed.split(':')[1].trim();
+          } else if (lower.startsWith('autor:')) {
+              currentQuery.author = trimmed.split(':')[1].trim();
+          } else if (!hasStructuredData) {
+              // Assume unstructured list of songs
+              queries.push({ title: trimmed, raw: trimmed });
+          }
+      }
+      if (currentQuery.title) queries.push({...currentQuery, raw: currentQuery.title});
+
+      if (queries.length === 0) return alert("No se encontraron criterios de búsqueda.");
+
+      let foundCount = 0;
+      const newSelection = [...selectedTracksList];
+      const normalize = (s: string) => s ? s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim() : "";
+      const notFoundList: string[] = [];
+
+      queries.forEach(q => {
+          const qTitle = normalize(q.title || "");
+          const qPerf = normalize(q.performer || "");
+          const qAuth = normalize(q.author || "");
+
+          if (!qTitle && !qPerf && !qAuth) return;
+
+          let bestMatch: Track | null = null;
+          let maxScore = 0;
+
+          tracks.forEach(t => {
+              let score = 0;
+              const tTitle = normalize(t.metadata.title || t.filename);
+              const tPerf = normalize(t.metadata.performer || "");
+              const tAuth = normalize(t.metadata.author || "");
+
+              // Scoring
+              if (qTitle && tTitle.includes(qTitle)) score += 10;
+              if (qTitle && tTitle === qTitle) score += 5; 
+              if (qPerf && tPerf.includes(qPerf)) score += 5;
+              if (qAuth && tAuth.includes(qAuth)) score += 5;
+
+              // Fallback logic for unstructured lines (e.g. "Song Name Artist")
+              if (!qPerf && !qAuth && q.raw) {
+                   const rawNorm = normalize(q.raw);
+                   if (tTitle.includes(rawNorm)) score += 10;
+                   // Check if raw query matches title AND artist loosely
+                   if (rawNorm.includes(tTitle) && tPerf && rawNorm.includes(tPerf)) score += 15; 
+              }
+
+              if (score > maxScore) {
+                  maxScore = score;
+                  bestMatch = t;
+              }
+          });
+
+          // Threshold
+          if (bestMatch && maxScore >= 10) { 
+              if (!newSelection.find(s => s.id === (bestMatch as Track).id)) {
+                  newSelection.push(bestMatch);
+                  foundCount++;
+              }
+          } else {
+              notFoundList.push(q.raw || q.title || "Desconocido");
+          }
+      });
+
+      setSelectedTracksList(newSelection);
+      setMissingQueries(notFoundList);
+
+      if (foundCount > 0 || notFoundList.length > 0) {
+          const msg = `Búsqueda completada.\nEncontrados: ${foundCount}\nNo encontrados: ${notFoundList.length}`;
+          // Optional: alert(msg); 
+      }
+  };
+
+  // --- HANDLERS ---
   const handleBulkSelectTxt = (file: File) => {
       const reader = new FileReader();
       reader.onload = (e) => {
           const text = e.target?.result;
           if (typeof text === 'string') {
-              // Parse the TXT input into objects
-              const queries = [];
-              const lines = text.split('\n');
-              let currentQuery: any = {};
-              
-              for (const line of lines) {
-                  const trimmed = line.trim();
-                  if (!trimmed) continue;
-                  
-                  const lower = trimmed.toLowerCase();
-                  if (lower.startsWith('título:') || lower.startsWith('titulo:')) {
-                      if (currentQuery.title) queries.push(currentQuery); // Push prev if exists
-                      currentQuery = { title: trimmed.split(':')[1].trim() };
-                  } else if (lower.startsWith('intérprete:') || lower.startsWith('interprete:')) {
-                      currentQuery.performer = trimmed.split(':')[1].trim();
-                  } else if (lower.startsWith('autor:')) {
-                      currentQuery.author = trimmed.split(':')[1].trim();
-                  }
-              }
-              if (currentQuery.title) queries.push(currentQuery);
-
-              if (queries.length === 0) return alert("No se encontraron criterios de búsqueda en el TXT.");
-
-              // Search Logic (Triangulation)
-              let foundCount = 0;
-              const newSelection = [...selectedTracksList];
-              const normalize = (s: string) => s ? s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim() : "";
-
-              queries.forEach(q => {
-                  const qTitle = normalize(q.title);
-                  const qPerf = normalize(q.performer);
-                  const qAuth = normalize(q.author);
-
-                  if (!qTitle && !qPerf && !qAuth) return;
-
-                  let bestMatch: Track | null = null;
-                  let maxScore = 0;
-
-                  tracks.forEach(t => {
-                      let score = 0;
-                      const tTitle = normalize(t.metadata.title || t.filename);
-                      const tPerf = normalize(t.metadata.performer);
-                      const tAuth = normalize(t.metadata.author);
-
-                      // Scoring
-                      if (qTitle && tTitle.includes(qTitle)) score += 10;
-                      if (qTitle && tTitle === qTitle) score += 5; // Bonus exact match
-                      if (qPerf && tPerf.includes(qPerf)) score += 5;
-                      if (qAuth && tAuth.includes(qAuth)) score += 5;
-
-                      // Fallback: If title missing in query, rely heavily on performer+author match
-                      if (!qTitle) {
-                          if (qPerf && tPerf.includes(qPerf)) score += 5;
-                          if (qAuth && tAuth.includes(qAuth)) score += 5;
-                      }
-
-                      if (score > maxScore) {
-                          maxScore = score;
-                          bestMatch = t;
-                      }
-                  });
-
-                  // Threshold for acceptance
-                  if (bestMatch && maxScore >= 10) { // At least a title partial match or double field match
-                      // Avoid duplicates
-                      if (!newSelection.find(s => s.id === (bestMatch as Track).id)) {
-                          newSelection.push(bestMatch);
-                          foundCount++;
-                      }
-                  }
-              });
-
-              setSelectedTracksList(newSelection);
-              alert(`Se encontraron y agregaron ${foundCount} coincidencias a la selección.`);
+              performBulkSearch(text);
           }
       };
       reader.readAsText(file);
   };
+
+  const handleWishlistSubmit = () => {
+      if (!wishlistText.trim()) return;
+      performBulkSearch(wishlistText);
+      setShowWishlist(false);
+      setWishlistText('');
+  };
+
   // ------------------------------------
 
   const handleSelectTrack = (track: Track) => {
     setSelectedTrack(track);
-    // Push state so back button closes it
     window.history.pushState({ trackId: track.id }, '');
   };
 
@@ -425,6 +465,7 @@ const App: React.FC = () => {
       if (selectedTracksList.length === 0) return;
       if (window.confirm('¿Desea limpiar toda la lista de selección?')) {
           setSelectedTracksList([]);
+          setMissingQueries([]);
       }
   };
 
@@ -615,6 +656,10 @@ const App: React.FC = () => {
                         isSelectionView={true}
                         onClearSelection={handleClearSelection}
                         onShareWhatsApp={handleShareWhatsApp}
+                        
+                        onOpenWishlist={() => setShowWishlist(true)}
+                        missingQueries={missingQueries}
+                        onClearMissing={() => setMissingQueries([])}
                     />
                 </div>
             )}
@@ -644,6 +689,40 @@ const App: React.FC = () => {
                 />
             )}
         </div>
+
+        {/* WISHLIST MODAL */}
+        {showWishlist && (
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in" onClick={() => setShowWishlist(false)}>
+                <div 
+                    className="w-full max-w-sm bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl p-6 animate-slide-up"
+                    onClick={e => e.stopPropagation()}
+                >
+                    <div className="flex justify-between items-center mb-4">
+                        <h3 className="text-xl font-bold text-gray-800 dark:text-white flex items-center gap-2">
+                             <span className="material-symbols-outlined text-miel">list_alt</span>
+                             Lista de Deseos
+                        </h3>
+                        <button onClick={() => setShowWishlist(false)} className="text-gray-400 hover:text-gray-600">
+                             <span className="material-symbols-outlined">close</span>
+                        </button>
+                    </div>
+                    <p className="text-xs text-gray-500 mb-2">Ingresa hasta 50 temas (uno por línea). Si no se encuentran, podrás buscarlos en YouTube.</p>
+                    <textarea 
+                        className="w-full h-48 p-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-black/20 text-sm focus:ring-2 focus:ring-primary/20 outline-none resize-none mb-4"
+                        placeholder="Ejemplo:&#10;La Guantanamera&#10;Chan Chan - Compay Segundo&#10;Ojalá"
+                        value={wishlistText}
+                        onChange={e => setWishlistText(e.target.value)}
+                    ></textarea>
+                    <button 
+                        onClick={handleWishlistSubmit}
+                        className="w-full bg-primary text-white font-bold py-3 rounded-xl shadow-lg hover:bg-primary-dark transition-colors flex justify-center items-center gap-2"
+                    >
+                        <span className="material-symbols-outlined">search</span>
+                        Buscar Temas
+                    </button>
+                </div>
+            </div>
+        )}
 
         {(view === ViewState.LIST || view === ViewState.SELECTION) && selectedTrack && (
             <TrackDetail 

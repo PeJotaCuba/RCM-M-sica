@@ -18,7 +18,12 @@ interface TrackListProps {
   isSelectionView?: boolean;
   onClearSelection?: () => void;
   onShareWhatsApp?: () => void;
-  onBulkSelectTxt?: (file: File) => void; // New prop for bulk selection
+  onBulkSelectTxt?: (file: File) => void;
+  
+  // Wishlist & Missing Props
+  onOpenWishlist?: () => void;
+  missingQueries?: string[];
+  onClearMissing?: () => void;
 }
 
 const FIXED_ROOTS = ['Música 1', 'Música 2', 'Música 3', 'Música 4', 'Música 5', 'Otros'];
@@ -30,7 +35,8 @@ const TrackList: React.FC<TrackListProps> = ({
     tracks, onSelectTrack, onUploadTxt, isAdmin, 
     onSyncRoot, onExportRoot, onClearRoot,
     selectedTrackIds, onToggleSelection, onDownloadReport, isSelectionView,
-    onClearSelection, onShareWhatsApp, onBulkSelectTxt
+    onClearSelection, onShareWhatsApp, onBulkSelectTxt,
+    onOpenWishlist, missingQueries, onClearMissing
 }) => {
   // Input State (Visual)
   const [inputValue, setInputValue] = useState('');
@@ -49,7 +55,7 @@ const TrackList: React.FC<TrackListProps> = ({
   // Scroll ref for tabs
   const tabsContainerRef = useRef<HTMLDivElement>(null);
 
-  // Debounce Effect: Updates search query only after user stops typing for 300ms
+  // Debounce Effect
   useEffect(() => {
       const handler = setTimeout(() => {
           setSearchQuery(inputValue);
@@ -60,17 +66,15 @@ const TrackList: React.FC<TrackListProps> = ({
       };
   }, [inputValue]);
 
-  // Reset pagination when filter or view changes
+  // Reset pagination
   useEffect(() => {
       setRenderLimit(ITEMS_PER_PAGE);
   }, [searchQuery, activeRoot, currentPath, searchScope]);
 
-  // Handle Back Button for Folder Navigation
+  // Handle Back Button
   useEffect(() => {
     const handlePopState = (event: PopStateEvent) => {
-        // If we are deep in folders (currentPath exists) AND not searching, go up
         if (currentPath && !inputValue && !isSelectionView) {
-            // Prevent default back behavior (exit) if we handled it
             handleNavigateUp();
         }
     };
@@ -96,22 +100,26 @@ const TrackList: React.FC<TrackListProps> = ({
   const handleNavigateUp = () => {
       if (!currentPath) return; 
       
-      if (currentPath === activeRoot) {
-          setCurrentPath('');
-          return;
-      }
-
       const segments = currentPath.split('/');
       segments.pop();
       const newPath = segments.join('/');
-      setCurrentPath(newPath || '');
+      
+      // Normalize comparison to check if we are at root level
+      const normalize = (str: string) => str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, '');
+      
+      // If newPath corresponds to the activeRoot (or is empty), we clear it
+      if (!newPath || normalize(newPath) === normalize(activeRoot)) {
+          setCurrentPath('');
+      } else {
+          setCurrentPath(newPath);
+      }
   };
 
   const handleFolderClick = (folderPath: string) => {
       setCurrentPath(folderPath);
       
+      // Attempt to sync active tab
       const folderRoot = folderPath.split('/')[0];
-      // Sync active root tab if we clicked a folder that matches one of the fixed roots
       const normalize = (str: string) => str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, '');
       const matchingFixedRoot = FIXED_ROOTS.find(r => normalize(r) === normalize(folderRoot));
       
@@ -119,7 +127,7 @@ const TrackList: React.FC<TrackListProps> = ({
           setActiveRoot(matchingFixedRoot);
       }
       
-      // Clear search when opening a folder from results
+      // Clear search to show folder content
       setInputValue('');
       setSearchQuery('');
   };
@@ -133,7 +141,7 @@ const TrackList: React.FC<TrackListProps> = ({
   const handleBulkFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       if (e.target.files && e.target.files[0] && onBulkSelectTxt) {
           onBulkSelectTxt(e.target.files[0]);
-          e.target.value = ''; // Reset
+          e.target.value = ''; 
       }
   };
 
@@ -159,7 +167,6 @@ const TrackList: React.FC<TrackListProps> = ({
 
   // --- Filtering Logic ---
   const displayItems = useMemo(() => {
-      // Si estamos en vista de selección, mostrar lista plana sin carpetas
       if (isSelectionView) {
           let list = tracks;
           if (searchQuery.trim()) {
@@ -184,7 +191,6 @@ const TrackList: React.FC<TrackListProps> = ({
       // --- SEARCH MODE ---
       if (searchQuery.trim()) {
           const escapeRegExp = (string: string) => string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); 
-
           const cleanQuery = normalizeStr(searchQuery.trim());
           const queryRegex = new RegExp(`\\b${escapeRegExp(cleanQuery)}`, 'i');
           
@@ -247,38 +253,31 @@ const TrackList: React.FC<TrackListProps> = ({
           return [...folderItems.sort((a,b) => a.name.localeCompare(b.name)), ...matchingTracks];
       }
 
-      // --- BROWSE MODE (Tab Scoped) ---
+      // --- BROWSE MODE ---
       
       const targetPath = currentPath || activeRoot;
       const targetPathNorm = normalizeStr(targetPath);
-      const rootFilterStr = normalizeStr(activeRoot);
       
-      const rootTracks = tracks.filter(t => {
-          if (!t.path) return false;
-          const pathNorm = normalizeStr(t.path);
-          return pathNorm.startsWith(rootFilterStr);
-      });
-
-      const foldersMap = new Set<string>();
       const filesList: any[] = [];
+      const foldersMap = new Set<string>();
 
-      for (const t of rootTracks) {
+      // Filter tracks that are relevant to current view (start with targetPath)
+      const relevantTracks = tracks.filter(t => t.path && normalizeStr(t.path).startsWith(targetPathNorm));
+
+      for (const t of relevantTracks) {
           const trackPath = t.path; 
-          const trackPathNorm = normalizeStr(trackPath);
-          
-          if (!trackPathNorm.startsWith(targetPathNorm)) continue;
-
           const trackSegments = trackPath.split('/').filter(p => p);
-          const targetSegmentCount = currentPath ? currentPath.split('/').filter(p => p).length : 1; 
+          const targetSegments = targetPath.split('/').filter(p => p);
+          const targetDepth = targetSegments.length;
           
-          if (trackSegments.length === targetSegmentCount + 1) {
-              filesList.push({
+          if (trackSegments.length === targetDepth) {
+               filesList.push({
                   type: 'track' as const,
                   data: t,
                   key: t.id
               });
-          } else if (trackSegments.length > targetSegmentCount + 1) {
-              const folderPath = trackSegments.slice(0, targetSegmentCount + 1).join('/');
+          } else if (trackSegments.length > targetDepth) {
+              const folderPath = trackSegments.slice(0, targetDepth + 1).join('/');
               foldersMap.add(folderPath);
           }
       }
@@ -349,10 +348,19 @@ const TrackList: React.FC<TrackListProps> = ({
                          <p className="text-xs text-gray-500">{tracks.length} elementos</p>
                      </div>
                      <div className="flex gap-2">
+                        {onOpenWishlist && (
+                            <button 
+                                onClick={onOpenWishlist}
+                                className="bg-miel text-white text-[10px] font-bold uppercase px-3 py-1 rounded flex items-center gap-1 hover:bg-yellow-600 shadow-sm"
+                            >
+                                <span className="material-symbols-outlined text-sm">list_alt</span>
+                                Lista Deseos
+                            </button>
+                        )}
                         {onBulkSelectTxt && (
                             <label className="text-primary text-[10px] font-bold uppercase border border-primary/30 px-2 py-1 rounded hover:bg-primary/5 cursor-pointer flex items-center gap-1">
                                 <span className="material-symbols-outlined text-sm">upload_file</span>
-                                Cargar TXT
+                                TXT
                                 <input type="file" accept=".txt" onChange={handleBulkFileChange} className="hidden" />
                             </label>
                         )}
@@ -361,7 +369,7 @@ const TrackList: React.FC<TrackListProps> = ({
                                  onClick={onClearSelection}
                                  className="text-red-500 text-[10px] font-bold uppercase border border-red-200 px-2 py-1 rounded hover:bg-red-50"
                              >
-                                 Limpiar Lista
+                                 Limpiar
                              </button>
                          )}
                      </div>
@@ -497,6 +505,40 @@ const TrackList: React.FC<TrackListProps> = ({
 
       {/* List Content */}
       <div className="flex-1 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-800 pb-24 bg-white dark:bg-background-dark">
+        
+        {/* MISSING ITEMS SECTION (Only in Selection View) */}
+        {isSelectionView && missingQueries && missingQueries.length > 0 && (
+             <div className="p-4 bg-orange-50 dark:bg-orange-900/10 border-b border-orange-100 dark:border-orange-500/20">
+                 <div className="flex justify-between items-center mb-3">
+                     <h3 className="text-sm font-bold text-orange-700 dark:text-orange-400 flex items-center gap-2">
+                         <span className="material-symbols-outlined">warning</span>
+                         Temas no encontrados ({missingQueries.length})
+                     </h3>
+                     {onClearMissing && (
+                        <button onClick={onClearMissing} className="text-xs text-orange-500 hover:underline">
+                            Ocultar
+                        </button>
+                     )}
+                 </div>
+                 <div className="space-y-2">
+                     {missingQueries.map((query, idx) => (
+                         <div key={idx} className="flex items-center justify-between bg-white dark:bg-black/20 p-2 rounded-lg border border-orange-100 dark:border-orange-500/20 shadow-sm">
+                             <p className="text-xs text-gray-600 dark:text-gray-300 font-medium truncate flex-1 pr-2">{query}</p>
+                             <a 
+                                href={`https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`} 
+                                target="_blank" 
+                                rel="noreferrer"
+                                className="flex items-center gap-1 bg-red-600 text-white px-2 py-1 rounded text-[10px] font-bold hover:bg-red-700 transition-colors"
+                             >
+                                 <span className="material-symbols-outlined text-sm">play_arrow</span>
+                                 YouTube
+                             </a>
+                         </div>
+                     ))}
+                 </div>
+             </div>
+        )}
+
         {/* Upload Area - Show if not searching and user is admin */}
         {!inputValue && isAdmin && !isSelectionView && (
             <div className="p-4 bg-gray-50 dark:bg-white/5 border-b border-dashed border-gray-300 dark:border-gray-700">
@@ -515,7 +557,7 @@ const TrackList: React.FC<TrackListProps> = ({
              </span>
              <p className="text-sm font-medium">{inputValue ? 'Sin resultados' : (isSelectionView ? 'No hay canciones seleccionadas' : 'Carpeta vacía')}</p>
              <p className="text-xs mt-1 opacity-60">
-                 {inputValue ? 'Intenta con otro término' : (isSelectionView ? 'Agrega canciones desde el Explorador' : 'No se encontraron elementos')}
+                 {inputValue ? 'Intenta con otro término' : (isSelectionView ? 'Agrega canciones desde el Explorador o usa Lista de Deseos' : 'No se encontraron elementos')}
              </p>
            </div>
         ) : (
