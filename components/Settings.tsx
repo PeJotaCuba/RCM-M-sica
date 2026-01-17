@@ -20,19 +20,21 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
       phone: '',
       password: '',
       confirmPassword: '',
+      uniqueId: '',
       role: 'guest' as 'guest' | 'admin'
   });
   const [showPassword, setShowPassword] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
 
   // Helper to generate Unique ID (Uppercase Letters + Numbers)
-  const generateUniqueId = () => {
+  const generateUniqueId = (name: string) => {
+      const initials = name ? name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 3) : 'USR';
       const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-      let result = '';
-      for (let i = 0; i < 8; i++) {
-          result += chars.charAt(Math.floor(Math.random() * chars.length));
+      let random = '';
+      for (let i = 0; i < 5; i++) {
+          random += chars.charAt(Math.floor(Math.random() * chars.length));
       }
-      return result;
+      return `${initials}-${random}`;
   };
 
   // --- STATS DOWNLOAD (2 SHEETS) ---
@@ -122,7 +124,7 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
   // --- USER MANAGEMENT ---
   const handleResetForm = () => {
       setFormData({
-          username: '', fullName: '', phone: '', password: '', confirmPassword: '', role: 'guest'
+          username: '', fullName: '', phone: '', password: '', confirmPassword: '', uniqueId: '', role: 'guest'
       });
       setIsEditing(false);
   };
@@ -134,6 +136,7 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
           phone: user.phone || '',
           password: user.password,
           confirmPassword: user.password,
+          uniqueId: user.uniqueId || '',
           role: user.role
       });
       setIsEditing(true);
@@ -156,9 +159,8 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
           return;
       }
 
-      // Preserve existing ID if editing, otherwise generate new
-      const existingUser = users.find(u => u.username === formData.username);
-      const uniqueId = existingUser?.uniqueId || generateUniqueId();
+      // Generate ID if empty
+      const finalUniqueId = formData.uniqueId.trim() || generateUniqueId(formData.fullName);
 
       const userObj: User = {
           username: formData.username,
@@ -166,7 +168,7 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
           role: formData.role,
           fullName: formData.fullName,
           phone: formData.phone,
-          uniqueId: uniqueId // Se asigna pero no se muestra en el form
+          uniqueId: finalUniqueId
       };
 
       if (isEditing) {
@@ -245,13 +247,21 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
                         />
                     </div>
 
-                    <input 
-                        placeholder="Nombre de Usuario (Login) *" 
-                        value={formData.username}
-                        disabled={isEditing} // Cannot change ID
-                        onChange={e => setFormData({...formData, username: e.target.value})}
-                        className={`p-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 text-sm ${isEditing ? 'opacity-50' : ''}`}
-                    />
+                    <div className="grid grid-cols-2 gap-3">
+                        <input 
+                            placeholder="Nombre de Usuario (Login) *" 
+                            value={formData.username}
+                            disabled={isEditing} 
+                            onChange={e => setFormData({...formData, username: e.target.value})}
+                            className={`p-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 text-sm ${isEditing ? 'opacity-50' : ''}`}
+                        />
+                        <input 
+                            placeholder="Firma Digital (Auto si vacío)" 
+                            value={formData.uniqueId}
+                            onChange={e => setFormData({...formData, uniqueId: e.target.value})}
+                            className="p-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 text-sm font-mono"
+                        />
+                    </div>
 
                     <div className="grid grid-cols-2 gap-3 relative">
                         <input 
@@ -310,11 +320,10 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
                                         </button>
                                     </div>
                                 </div>
-                                <div className="text-xs text-gray-500 flex gap-4">
+                                <div className="text-xs text-gray-500 flex flex-wrap gap-4">
                                     <span><span className="font-bold">Nombre:</span> {u.fullName || '---'}</span>
-                                    <span><span className="font-bold">Tel:</span> {u.phone || '---'}</span>
+                                    <span><span className="font-bold">ID:</span> {u.uniqueId || '---'}</span>
                                 </div>
-                                {/* ID is hidden here as requested */}
                             </div>
                         ))}
                     </div>
