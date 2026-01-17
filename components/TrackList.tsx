@@ -11,14 +11,18 @@ interface TrackListProps {
   onExportRoot: (root: string) => void;
 }
 
-const FIXED_ROOTS = ['Música 1', 'Música 2', 'Música 3', 'Música 4', 'Música 5'];
+const FIXED_ROOTS = ['Música 1', 'Música 2', 'Música 3', 'Música 4', 'Música 5', 'Otros'];
 const ITEMS_PER_PAGE = 50;
+
+type SearchScope = 'global' | 'root';
 
 const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTxt, isAdmin, onSyncRoot, onExportRoot }) => {
   // Input State (Visual)
   const [inputValue, setInputValue] = useState('');
   // Query State (Applied after delay)
   const [searchQuery, setSearchQuery] = useState('');
+  // Search Scope
+  const [searchScope, setSearchScope] = useState<SearchScope>('global');
   
   // Navigation State
   const [activeRoot, setActiveRoot] = useState<string>(FIXED_ROOTS[0]); 
@@ -41,7 +45,29 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
   // Reset pagination when filter or view changes
   useEffect(() => {
       setRenderLimit(ITEMS_PER_PAGE);
-  }, [searchQuery, activeRoot, currentPath]);
+  }, [searchQuery, activeRoot, currentPath, searchScope]);
+
+  // Handle Back Button for Folder Navigation
+  useEffect(() => {
+    const handlePopState = (event: PopStateEvent) => {
+        // If we are deep in folders (currentPath exists) AND not searching, go up
+        if (currentPath && !inputValue) {
+            // Prevent default back behavior (exit) if we handled it
+            handleNavigateUp();
+        }
+    };
+
+    // Push a state when entering a folder to allow "back" to work
+    if (currentPath) {
+        window.history.pushState({ folder: currentPath }, '');
+    }
+
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+        window.removeEventListener('popstate', handlePopState);
+    };
+  }, [currentPath, inputValue]);
+
 
   const handleRootChange = (root: string) => {
       setActiveRoot(root);
@@ -87,33 +113,41 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
       setRenderLimit(prev => prev + ITEMS_PER_PAGE);
   };
 
+  const toggleSearchScope = () => {
+      setSearchScope(prev => prev === 'global' ? 'root' : 'global');
+  };
+
   // --- Filtering Logic ---
   const displayItems = useMemo(() => {
-      // --- GLOBAL SEARCH MODE ---
+      // --- SEARCH MODE ---
       if (searchQuery.trim()) {
-          // 1. Funciones de limpieza para la búsqueda
+          // 1. Funciones de limpieza
           const normalize = (str: string) => str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
           const escapeRegExp = (string: string) => string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); 
 
           const cleanQuery = normalize(searchQuery.trim());
-          
-          // 2. Crear Regex con \b (Word Boundary)
-          // \b asegura que la coincidencia empiece al inicio de una palabra.
-          // Ej: "Lov" encontrará "Lover" (empieza por Lov) pero NO "Llover" (la L anterior bloquea el match).
           const queryRegex = new RegExp(`\\b${escapeRegExp(cleanQuery)}`, 'i');
           
           const matchingTracks: any[] = [];
           const matchingFolders = new Set<string>();
 
+          // Determinamos el pool de tracks según el alcance
+          let tracksPool = tracks;
+          if (searchScope === 'root') {
+              // Filtrar solo los que pertenecen a la raíz/carpeta activa
+              const activeRootLower = activeRoot.toLowerCase();
+              tracksPool = tracks.filter(t => t.path && t.path.toLowerCase().startsWith(activeRootLower));
+          }
+
           // Optimized single-pass loop
-          for (const t of tracks) {
+          for (const t of tracksPool) {
                // Normalizar campos del track
                const normFilename = normalize(t.filename);
                const normTitle = normalize(t.metadata.title || "");
                const normPerformer = normalize(t.metadata.performer || "");
                const normPath = t.path ? normalize(t.path) : "";
 
-               // Track Matching usando Regex de frontera de palabra
+               // Track Matching
                const matchesTrack = 
                   queryRegex.test(normFilename) ||
                   queryRegex.test(normTitle) ||
@@ -128,14 +162,18 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
                    });
                }
 
-               // Folder Matching (Simplificado para carpetas: búsqueda simple de texto para no ser tan restrictivo con rutas)
-               // En rutas, a veces queremos encontrar "Pop" dentro de "Musica/Pop/Latino" aunque no sea inicio exacto de palabra si hay simbolos raros.
-               // Pero aplicamos la misma logica de normalización por consistencia visual.
+               // Folder Matching
                if (t.path) {
                   const segments = t.path.split('/');
                   let progressive = "";
                   for (const seg of segments) {
                       progressive = progressive ? `${progressive}/${seg}` : seg;
+                      
+                      // Si el alcance es root, solo mostrar carpetas que empiecen con esa root
+                      if (searchScope === 'root' && !progressive.toLowerCase().startsWith(activeRoot.toLowerCase())) {
+                          continue;
+                      }
+
                       const normSeg = normalize(seg);
                       if (queryRegex.test(normSeg)) {
                           matchingFolders.add(progressive);
@@ -201,7 +239,7 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
 
       return [...foldersList, ...filesList];
 
-  }, [tracks, activeRoot, currentPath, searchQuery]);
+  }, [tracks, activeRoot, currentPath, searchQuery, searchScope]);
 
   // Sliced items for rendering
   const visibleItems = displayItems.slice(0, renderLimit);
@@ -235,23 +273,35 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
             {/* Search Bar */}
              <label className="flex-1 flex flex-col relative">
                 <div className="flex w-full items-stretch rounded-lg h-11 overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-zinc-900 transition-all focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/30">
-                <div className="text-gray-400 flex items-center justify-center pl-3">
-                    <span className="material-symbols-outlined text-xl">search</span>
-                </div>
-                <input 
-                    className="flex w-full border-none bg-transparent text-gray-900 dark:text-white focus:ring-0 placeholder:text-gray-400 px-3 text-sm font-normal" 
-                    placeholder="Buscar (Título, Artista, Palabra inicial...)"
-                    value={inputValue}
-                    onChange={(e) => setInputValue(e.target.value)}
-                />
-                {inputValue && (
+                    <div className="text-gray-400 flex items-center justify-center pl-3">
+                        <span className="material-symbols-outlined text-xl">search</span>
+                    </div>
+                    <input 
+                        className="flex w-full border-none bg-transparent text-gray-900 dark:text-white focus:ring-0 placeholder:text-gray-400 px-3 text-sm font-normal" 
+                        placeholder={searchScope === 'global' ? "Buscar en todo..." : `Buscar en ${activeRoot}...`}
+                        value={inputValue}
+                        onChange={(e) => setInputValue(e.target.value)}
+                    />
+                    
+                    {/* Toggle Search Scope */}
                     <button 
-                        onClick={() => { setInputValue(''); setSearchQuery(''); }}
-                        className="pr-3 text-gray-400 hover:text-gray-600 flex items-center"
+                        onClick={toggleSearchScope}
+                        className={`px-3 flex items-center justify-center border-l border-gray-200 dark:border-gray-700 transition-colors ${searchScope === 'global' ? 'text-gray-400 hover:text-primary' : 'text-primary bg-primary/10'}`}
+                        title={searchScope === 'global' ? "Cambiar a búsqueda local" : "Cambiar a búsqueda global"}
                     >
-                        <span className="material-symbols-outlined text-lg">close</span>
+                        <span className="material-symbols-outlined text-lg">
+                            {searchScope === 'global' ? 'public' : 'folder_open'}
+                        </span>
                     </button>
-                )}
+
+                    {inputValue && (
+                        <button 
+                            onClick={() => { setInputValue(''); setSearchQuery(''); }}
+                            className="px-3 text-gray-400 hover:text-gray-600 flex items-center"
+                        >
+                            <span className="material-symbols-outlined text-lg">close</span>
+                        </button>
+                    )}
                 </div>
             </label>
 
@@ -308,7 +358,10 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
             {inputValue && (
                 <div className="text-xs text-gray-500 px-1 font-semibold flex justify-between">
                     <span>{searchQuery !== inputValue ? 'Buscando...' : `Resultados para "${searchQuery}"`}</span>
-                    <span>{displayItems.length} encontrados</span>
+                    <span className="flex items-center gap-1">
+                        {searchScope === 'root' && <span className="text-[10px] bg-gray-200 dark:bg-gray-700 px-1.5 py-0.5 rounded text-gray-600 dark:text-gray-300">Solo {activeRoot}</span>}
+                        <span>{displayItems.length} encontrados</span>
+                    </span>
                 </div>
             )}
         </div>

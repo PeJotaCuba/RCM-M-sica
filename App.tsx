@@ -56,25 +56,49 @@ const App: React.FC = () => {
   const [isUpdating, setIsUpdating] = useState(false);
   const [isSaving, setIsSaving] = useState(false); // Visual indicator for saving
 
+  // Handle Browser Back Button
+  useEffect(() => {
+    // Only attach logic if logged in
+    if (view === ViewState.LOGIN) return;
+
+    const handlePopState = (event: PopStateEvent) => {
+        // Priority 1: Close Modal
+        if (selectedTrack) {
+            setSelectedTrack(null);
+            return;
+        }
+
+        // Priority 2: Return to List View if in Settings/Productions/Results
+        if (view !== ViewState.LIST) {
+            setView(ViewState.LIST);
+            return;
+        }
+        
+        // Note: Folder navigation back is handled inside TrackList
+    };
+
+    // Push initial state so we have something to pop
+    window.history.pushState({ appLevel: true }, '');
+
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+        window.removeEventListener('popstate', handlePopState);
+    };
+  }, [selectedTrack, view]);
+
+
   // Helper to save tracks (Optimized for IndexedDB)
-  // FIX: Calculamos el nuevo estado ANTES de llamar a setTracks y saveTracksToDB
-  // para evitar guardar arrays vacíos debido a la asincronía de React.
   const updateTracks = async (newTracksInput: Track[] | ((prev: Track[]) => Track[])) => {
-      // 1. Calcular el nuevo estado basado en el actual (tracks)
       let finalTracks: Track[];
       
       if (typeof newTracksInput === 'function') {
-          // Si es una función de actualización (ej: prev => ...), la ejecutamos con el estado actual
           finalTracks = newTracksInput(tracks);
       } else {
-          // Si es un array directo, lo usamos
           finalTracks = newTracksInput;
       }
 
-      // 2. Actualizar la interfaz (React)
       setTracks(finalTracks);
 
-      // 3. Guardar en Base de Datos (IndexedDB)
       setIsSaving(true);
       try {
           await saveTracksToDB(finalTracks);
@@ -109,20 +133,15 @@ const App: React.FC = () => {
   // Initialize
   useEffect(() => {
     const initApp = async () => {
-        // 1. Load Tracks from IndexedDB (Async)
-        // Esto asegura que los datos persistan incluso si se cierra el navegador
         try {
             const dbTracks = await loadTracksFromDB();
             if (dbTracks.length > 0) {
                 setTracks(dbTracks);
-            } else {
-                console.log("Base de datos local vacía o inicial.");
             }
         } catch (e) {
             console.error("Error inicializando DB:", e);
         }
 
-        // 2. Load Users
         const localUsers = localStorage.getItem(USERS_KEY);
         let currentUsersList = [DEFAULT_ADMIN];
         if (localUsers) {
@@ -133,7 +152,6 @@ const App: React.FC = () => {
         }
         setUsers(currentUsersList);
 
-        // 3. Load Recent Tracks (Persistence)
         const localRecents = localStorage.getItem(RECENT_TRACKS_KEY);
         if (localRecents) {
             try {
@@ -142,7 +160,6 @@ const App: React.FC = () => {
             } catch {}
         }
 
-        // 4. Restore Session
         const savedUserStr = localStorage.getItem(AUTH_KEY);
         if (savedUserStr) {
             try {
@@ -172,7 +189,6 @@ const App: React.FC = () => {
   };
 
   const handleLogout = () => {
-      // Elimina solo la sesión, MANTIENE los datos cargados (tracks y recents) para persistencia
       localStorage.removeItem(AUTH_KEY);
       setAuthMode(null);
       setCurrentUser(null);
@@ -180,15 +196,12 @@ const App: React.FC = () => {
       setSelectedTrack(null);
   };
 
-  // --- USER MANAGEMENT ---
   const handleAddUser = (u: User) => updateUsers([...users, u]);
   const handleEditUser = (updatedUser: User) => updateUsers(users.map(u => u.username === updatedUser.username ? updatedUser : u));
   const handleDeleteUser = (username: string) => {
       if (users.length <= 1) return alert("No se puede eliminar el último usuario.");
       updateUsers(users.filter(u => u.username !== username));
   };
-
-  // --- SYNC FUNCTIONS ---
 
   const handleSyncUsers = async () => {
       setIsUpdating(true);
@@ -212,9 +225,6 @@ const App: React.FC = () => {
   };
 
   const handleSyncMusicRoot = async (rootName: string) => {
-      // Permitir a usuarios actualizar también
-      // if (authMode !== 'admin') return; 
-
       const url = DB_URLS[rootName];
       if (!url) {
           alert(`No hay una URL configurada para ${rootName}`);
@@ -232,9 +242,6 @@ const App: React.FC = () => {
           const newTracks = await response.json();
           if (!Array.isArray(newTracks)) throw new Error("JSON inválido");
 
-          // Optimización: Filtrar de forma segura usando el path
-          // Mantenemos todo lo que NO sea de esta raíz, y agregamos lo nuevo
-          // Usamos 'tracks' del estado actual (closure)
           const tracksToKeep = tracks.filter(t => !t.path.startsWith(rootName));
           const updatedList = [...tracksToKeep, ...newTracks];
           
@@ -297,9 +304,11 @@ const App: React.FC = () => {
 
   const handleSelectTrack = (track: Track) => {
     setSelectedTrack(track);
+    // Push state so back button closes it
+    window.history.pushState({ trackId: track.id }, '');
+    
     setRecentTracks(prev => {
         const updated = [track, ...prev.filter(t => t.id !== track.id)].slice(0, 10);
-        // Persistir Recientes
         localStorage.setItem(RECENT_TRACKS_KEY, JSON.stringify(updated));
         return updated;
     });
@@ -341,7 +350,10 @@ const App: React.FC = () => {
       );
   }
 
-  const navigateTo = (v: ViewState) => setView(v);
+  const navigateTo = (v: ViewState) => {
+      setView(v);
+      window.history.pushState({ view: v }, '');
+  };
 
   return (
     <div className="max-w-md mx-auto h-[100dvh] bg-gray-100 shadow-2xl overflow-hidden relative border-x border-gray-200 flex flex-col">
