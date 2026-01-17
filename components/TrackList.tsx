@@ -94,7 +94,11 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
       setCurrentPath(folderPath);
       
       const folderRoot = folderPath.split('/')[0];
-      const matchingFixedRoot = FIXED_ROOTS.find(r => r.toLowerCase() === folderRoot.toLowerCase());
+      // Sync active root tab if we clicked a folder that matches one of the fixed roots
+      // Normalize comparison to handle Musica 1 vs Música 1
+      const normalize = (str: string) => str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, '');
+      const matchingFixedRoot = FIXED_ROOTS.find(r => normalize(r) === normalize(folderRoot));
+      
       if (matchingFixedRoot) {
           setActiveRoot(matchingFixedRoot);
       }
@@ -117,15 +121,16 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
       setSearchScope(prev => prev === 'global' ? 'root' : 'global');
   };
 
+  // Helper for normalization
+  const normalizeStr = (str: string) => str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
   // --- Filtering Logic ---
   const displayItems = useMemo(() => {
       // --- SEARCH MODE ---
       if (searchQuery.trim()) {
-          // 1. Funciones de limpieza
-          const normalize = (str: string) => str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
           const escapeRegExp = (string: string) => string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); 
 
-          const cleanQuery = normalize(searchQuery.trim());
+          const cleanQuery = normalizeStr(searchQuery.trim());
           const queryRegex = new RegExp(`\\b${escapeRegExp(cleanQuery)}`, 'i');
           
           const matchingTracks: any[] = [];
@@ -134,21 +139,20 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
           // Determinamos el pool de tracks y el prefijo de búsqueda según el alcance
           let tracksPool = tracks;
           // Context Path es la ruta desde la que se inicia la búsqueda local
-          // Si estamos en "Música 1/Cubana", buscamos ahí dentro. Si estamos en "Música 1", buscamos en todo Música 1.
           const contextPath = currentPath || activeRoot;
 
           if (searchScope === 'root') {
-              const contextPathLower = contextPath.toLowerCase();
-              tracksPool = tracks.filter(t => t.path && t.path.toLowerCase().startsWith(contextPathLower));
+              const contextPathNorm = normalizeStr(contextPath);
+              tracksPool = tracks.filter(t => t.path && normalizeStr(t.path).startsWith(contextPathNorm));
           }
 
           // Optimized single-pass loop
           for (const t of tracksPool) {
                // Normalizar campos del track
-               const normFilename = normalize(t.filename);
-               const normTitle = normalize(t.metadata.title || "");
-               const normPerformer = normalize(t.metadata.performer || "");
-               const normPath = t.path ? normalize(t.path) : "";
+               const normFilename = normalizeStr(t.filename);
+               const normTitle = normalizeStr(t.metadata.title || "");
+               const normPerformer = normalizeStr(t.metadata.performer || "");
+               const normPath = t.path ? normalizeStr(t.path) : "";
 
                // Track Matching
                const matchesTrack = 
@@ -172,12 +176,12 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
                   for (const seg of segments) {
                       progressive = progressive ? `${progressive}/${seg}` : seg;
                       
-                      // Si el alcance es local, solo mostramos carpetas que estén DENTRO del contexto actual
-                      if (searchScope === 'root' && !progressive.toLowerCase().startsWith(contextPath.toLowerCase())) {
+                      // Si el alcance es local, solo mostramos carpetas que estén DENTRO del contexto actual (normalizado)
+                      if (searchScope === 'root' && !normalizeStr(progressive).startsWith(normalizeStr(contextPath))) {
                           continue;
                       }
 
-                      const normSeg = normalize(seg);
+                      const normSeg = normalizeStr(seg);
                       if (queryRegex.test(normSeg)) {
                           matchingFolders.add(progressive);
                       }
@@ -198,36 +202,107 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
       // --- BROWSE MODE (Tab Scoped) ---
       
       const targetPath = currentPath || activeRoot;
-      const targetPathLower = targetPath.toLowerCase();
-      const activeRootLower = activeRoot.toLowerCase();
-
-      // Filter tracks by active root first
-      const rootTracks = tracks.filter(t => t.path && t.path.toLowerCase().startsWith(activeRootLower));
+      const targetPathNorm = normalizeStr(targetPath);
+      
+      // Filter tracks by active root logic (Normalized comparison to allow Musica1 vs Música 1)
+      // We look for tracks that start with the active Root (Música 1) OR the current Path state
+      // But if currentPath is empty, we must match activeRoot
+      const rootFilterStr = normalizeStr(activeRoot);
+      
+      // We assume tracks belonging to this tab start with a path that normalizes to the tab name
+      const rootTracks = tracks.filter(t => {
+          if (!t.path) return false;
+          const pathNorm = normalizeStr(t.path);
+          return pathNorm.startsWith(rootFilterStr);
+      });
 
       const foldersMap = new Set<string>();
       const filesList: any[] = [];
 
       for (const t of rootTracks) {
           const trackPath = t.path; 
+          const trackPathNorm = normalizeStr(trackPath);
           
-          if (!trackPath.toLowerCase().startsWith(targetPathLower)) continue;
+          // Must start with current navigation target
+          if (!trackPathNorm.startsWith(targetPathNorm)) continue;
 
-          // Check if direct child
-          if (trackPath.length === targetPath.length || (trackPath.length === targetPath.length + 1 && trackPath.endsWith('/'))) {
+          // Determine relative depth
+          // targetPath: "Musica 1"
+          // trackPath: "Musica 1/Cubana/Song.mp3"
+          // We need to match lengths in terms of segments, not strings, to be safe, but string norm is okay for now if separators match.
+          
+          // To be precise, let's look at the remainder
+          // If targetPath is "Musica 1", remainder is "/Cubana/Song.mp3" (or "Cubana/Song.mp3")
+          // If remainder has no slashes, it's a file in this folder.
+          // If remainder has slashes, it's a folder.
+          
+          // We need to use the original string lengths for substring to extract correct folder names
+          // But we matched using normalized strings.
+          // Strategy: Find where the match ends in the original string.
+          
+          // Heuristic: If we are at root, we just take the next segment.
+          // If trackPath is "Musica 1/Cubana", and target is "Musica 1" (or "Música 1"),
+          // We assume the first segment is the root.
+          
+          const parts = trackPath.split('/');
+          const targetParts = targetPath ? targetPath.split('/') : [activeRoot]; // If empty currentPath, usage activeRoot logic
+          
+          // Logic for Root Level (currentPath is empty, but we simulate it being activeRoot)
+          // If currentPath is empty, we show items where the first segment normalizes to activeRoot
+          
+          // Actually, currentPath is initialized to '' but managed in handleRootChange to ''
+          // But handleRootChange relies on logic.
+          // Let's rely on string replace based on normalized prefix length is risky.
+          
+          // Safer: Split both by '/'. 
+          // If currentPath is defined, we want items with len = currentParts + 1 (files) or > (folders)
+          
+          // BUT: we filtered `rootTracks` based on normalized `activeRoot`.
+          // If `currentPath` is empty, we treat `activeRoot` as the base.
+          
+          // Effectively, we want to show children of `targetPath`.
+          // Issue: `targetPath` might be "Música 1" (UI) but track is "Musica 1" (File).
+          // We matched them via normalization.
+          // So we should consume the matching prefix from the track path.
+          
+          // Find the index of the first separator after the matching length?
+          // Since we verified startsWith on normalized, we can try to guess.
+          // Better: just check segments.
+          
+          // Remove the normalized prefix from normalized track path?
+          // No, we need the original casing for display.
+          
+          // Let's assume consistent delimiters '/'.
+          // Length of segments.
+          const trackSegments = trackPath.split('/').filter(p => p);
+          // How many segments constitutes the "Current Path"?
+          // If currentPath is empty, we are at root "tab". The "tab" usually corresponds to the first segment of the path.
+          // So we want tracks where segment count is 2 (Root/File) -> File
+          // Or > 2 (Root/Folder/...) -> Folder
+          
+          // If currentPath is "Música 1/Cubana", count is 2.
+          // We want tracks with 3 segments (File) or > 3 (Folder).
+          
+          const targetSegmentCount = currentPath ? currentPath.split('/').filter(p => p).length : 1; 
+          
+          // Note: If currentPath is empty, we assume we are inside the Root (depth 1), so we look for depth 2+.
+          
+          if (trackSegments.length === targetSegmentCount + 1) {
+              // Direct child file
               filesList.push({
                   type: 'track' as const,
                   data: t,
                   key: t.id
               });
-          } else {
-              // It's in a subfolder
-              const relative = trackPath.substring(targetPath.length).replace(/^\//, '');
-              const nextFolder = relative.split('/')[0];
+          } else if (trackSegments.length > targetSegmentCount + 1) {
+              // Subfolder
+              // Get the name of the segment at index `targetSegmentCount`
+              const nextFolderName = trackSegments[targetSegmentCount];
               
-              if (nextFolder) {
-                  const fullFolderPath = targetPath ? `${targetPath}/${nextFolder}` : nextFolder;
-                  foldersMap.add(fullFolderPath);
-              }
+              // We need to reconstruct the full path for the folder click
+              // It should match the track's path structure for continuity
+              const folderPath = trackSegments.slice(0, targetSegmentCount + 1).join('/');
+              foldersMap.add(folderPath);
           }
       }
 
@@ -316,11 +391,12 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
                     <div className="flex items-center gap-2">
                         <span className="material-symbols-outlined text-base text-miel">hard_drive</span>
                         <span className="font-bold text-gray-700 dark:text-gray-300">{activeRoot}</span>
-                        {currentPath && currentPath !== activeRoot && (
+                        {currentPath && normalizeStr(currentPath) !== normalizeStr(activeRoot) && (
                             <>
                                 <span className="material-symbols-outlined text-sm text-gray-400">chevron_right</span>
                                 <span className="truncate font-mono text-gray-600 dark:text-gray-400 max-w-[120px]">
-                                    {currentPath.substring(activeRoot.length).replace(/^\//, '').replace(/\//g, ' / ')}
+                                    {/* Show relative path from root, handling normalization mismatches gracefully */}
+                                    {currentPath.split('/').slice(1).join(' / ')}
                                 </span>
                             </>
                         )}
@@ -349,7 +425,7 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
                         )}
                     </div>
 
-                    {currentPath && currentPath !== activeRoot && (
+                    {currentPath && normalizeStr(currentPath) !== normalizeStr(activeRoot) && (
                         <button 
                             onClick={handleNavigateUp}
                             className="ml-auto size-8 flex items-center justify-center bg-gray-100 dark:bg-gray-800 rounded-full text-gray-600 dark:text-gray-300 hover:bg-gray-200 transition-colors border border-gray-200 dark:border-gray-700"
