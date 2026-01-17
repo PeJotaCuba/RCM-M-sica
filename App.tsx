@@ -23,7 +23,8 @@ const DB_URLS: Record<string, string> = {
     'Música 2': 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/mdatos2.json',
     'Música 3': 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/mdatos3.json',
     'Música 4': 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/mdatos4.json', 
-    'Música 5': 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/mdatos5.json'
+    'Música 5': 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/mdatos5.json',
+    'Otros': 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/mdatos6.json'
 };
 
 const USERS_DB_URL = 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/musuarios.json';
@@ -261,8 +262,15 @@ const App: React.FC = () => {
       const rootTracks = tracks.filter(t => t.path.startsWith(rootName));
       if (rootTracks.length === 0) return alert(`No hay temas en ${rootName}.`);
 
-      const rootNumber = rootName.split(' ')[1];
-      const filename = `mdatos${rootNumber}.json`;
+      // Determine number or just use name for Other
+      let filename = 'mdatos.json';
+      if (rootName.includes(' ')) {
+          const rootNumber = rootName.split(' ')[1];
+          filename = `mdatos${rootNumber}.json`;
+      } else if (rootName === 'Otros') {
+          filename = 'mdatos6.json';
+      }
+
       const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(rootTracks, null, 2));
       
       const a = document.createElement('a');

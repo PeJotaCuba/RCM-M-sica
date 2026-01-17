@@ -131,12 +131,15 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
           const matchingTracks: any[] = [];
           const matchingFolders = new Set<string>();
 
-          // Determinamos el pool de tracks según el alcance
+          // Determinamos el pool de tracks y el prefijo de búsqueda según el alcance
           let tracksPool = tracks;
+          // Context Path es la ruta desde la que se inicia la búsqueda local
+          // Si estamos en "Música 1/Cubana", buscamos ahí dentro. Si estamos en "Música 1", buscamos en todo Música 1.
+          const contextPath = currentPath || activeRoot;
+
           if (searchScope === 'root') {
-              // Filtrar solo los que pertenecen a la raíz/carpeta activa
-              const activeRootLower = activeRoot.toLowerCase();
-              tracksPool = tracks.filter(t => t.path && t.path.toLowerCase().startsWith(activeRootLower));
+              const contextPathLower = contextPath.toLowerCase();
+              tracksPool = tracks.filter(t => t.path && t.path.toLowerCase().startsWith(contextPathLower));
           }
 
           // Optimized single-pass loop
@@ -169,8 +172,8 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
                   for (const seg of segments) {
                       progressive = progressive ? `${progressive}/${seg}` : seg;
                       
-                      // Si el alcance es root, solo mostrar carpetas que empiecen con esa root
-                      if (searchScope === 'root' && !progressive.toLowerCase().startsWith(activeRoot.toLowerCase())) {
+                      // Si el alcance es local, solo mostramos carpetas que estén DENTRO del contexto actual
+                      if (searchScope === 'root' && !progressive.toLowerCase().startsWith(contextPath.toLowerCase())) {
                           continue;
                       }
 
@@ -244,6 +247,9 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
   // Sliced items for rendering
   const visibleItems = displayItems.slice(0, renderLimit);
 
+  // Nombre de la carpeta actual para el placeholder
+  const currentFolderName = currentPath ? currentPath.split('/').pop() : activeRoot;
+
   return (
     <div className="flex flex-col h-full bg-background-light dark:bg-background-dark">
       {/* Header Area */}
@@ -278,7 +284,7 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
                     </div>
                     <input 
                         className="flex w-full border-none bg-transparent text-gray-900 dark:text-white focus:ring-0 placeholder:text-gray-400 px-3 text-sm font-normal" 
-                        placeholder={searchScope === 'global' ? "Buscar en todo..." : `Buscar en ${activeRoot}...`}
+                        placeholder={searchScope === 'global' ? "Buscar en todo..." : `Buscar en ${currentFolderName}...`}
                         value={inputValue}
                         onChange={(e) => setInputValue(e.target.value)}
                     />
@@ -287,7 +293,7 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
                     <button 
                         onClick={toggleSearchScope}
                         className={`px-3 flex items-center justify-center border-l border-gray-200 dark:border-gray-700 transition-colors ${searchScope === 'global' ? 'text-gray-400 hover:text-primary' : 'text-primary bg-primary/10'}`}
-                        title={searchScope === 'global' ? "Cambiar a búsqueda local" : "Cambiar a búsqueda global"}
+                        title={searchScope === 'global' ? "Cambiar a búsqueda local" : `Cambiar a búsqueda global`}
                     >
                         <span className="material-symbols-outlined text-lg">
                             {searchScope === 'global' ? 'public' : 'folder_open'}
@@ -359,7 +365,7 @@ const TrackList: React.FC<TrackListProps> = ({ tracks, onSelectTrack, onUploadTx
                 <div className="text-xs text-gray-500 px-1 font-semibold flex justify-between">
                     <span>{searchQuery !== inputValue ? 'Buscando...' : `Resultados para "${searchQuery}"`}</span>
                     <span className="flex items-center gap-1">
-                        {searchScope === 'root' && <span className="text-[10px] bg-gray-200 dark:bg-gray-700 px-1.5 py-0.5 rounded text-gray-600 dark:text-gray-300">Solo {activeRoot}</span>}
+                        {searchScope === 'root' && <span className="text-[10px] bg-gray-200 dark:bg-gray-700 px-1.5 py-0.5 rounded text-gray-600 dark:text-gray-300">Solo en {currentFolderName}</span>}
                         <span>{displayItems.length} encontrados</span>
                     </span>
                 </div>
