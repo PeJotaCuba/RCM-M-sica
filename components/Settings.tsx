@@ -25,6 +25,16 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
   const [showPassword, setShowPassword] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
 
+  // Helper to generate Unique ID (Uppercase Letters + Numbers)
+  const generateUniqueId = () => {
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+      let result = '';
+      for (let i = 0; i < 8; i++) {
+          result += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      return result;
+  };
+
   // --- STATS DOWNLOAD (2 SHEETS) ---
   const downloadCreditStats = () => {
       // 1. Gather Data
@@ -146,12 +156,17 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
           return;
       }
 
+      // Preserve existing ID if editing, otherwise generate new
+      const existingUser = users.find(u => u.username === formData.username);
+      const uniqueId = existingUser?.uniqueId || generateUniqueId();
+
       const userObj: User = {
           username: formData.username,
           password: formData.password,
           role: formData.role,
           fullName: formData.fullName,
-          phone: formData.phone
+          phone: formData.phone,
+          uniqueId: uniqueId // Se asigna pero no se muestra en el form
       };
 
       if (isEditing) {
@@ -290,7 +305,6 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
                                          <button onClick={() => handleEditClick(u)} className="text-primary hover:text-primary-dark" title="Editar">
                                             <span className="material-symbols-outlined text-lg">edit</span>
                                         </button>
-                                        {/* Cannot delete self if only 1 admin logic handled in App.tsx, here just check length visually or let handler catch it */}
                                         <button onClick={() => onDeleteUser(u.username)} className="text-red-400 hover:text-red-600" title="Eliminar">
                                             <span className="material-symbols-outlined text-lg">delete</span>
                                         </button>
@@ -300,6 +314,7 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
                                     <span><span className="font-bold">Nombre:</span> {u.fullName || '---'}</span>
                                     <span><span className="font-bold">Tel:</span> {u.phone || '---'}</span>
                                 </div>
+                                {/* ID is hidden here as requested */}
                             </div>
                         ))}
                     </div>

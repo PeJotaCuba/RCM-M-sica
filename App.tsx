@@ -36,7 +36,8 @@ const DEFAULT_ADMIN: User = {
     password: 'RCMM26', 
     role: 'admin',
     fullName: 'Administrador Principal',
-    phone: '55555555' 
+    phone: '55555555',
+    uniqueId: 'ADMIN01'
 };
 
 const App: React.FC = () => {
@@ -59,11 +60,25 @@ const App: React.FC = () => {
   const [missingQueries, setMissingQueries] = useState<string[]>([]);
   const [wishlistText, setWishlistText] = useState('');
 
+  // NEW: Export Preview & Editing
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [manualEntries, setManualEntries] = useState<string[]>([]);
+
   // Search State
   const [foundCredits, setFoundCredits] = useState<CreditInfo | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const [isSaving, setIsSaving] = useState(false); // Visual indicator for saving
+
+  // Helper to generate Unique ID (Uppercase Letters + Numbers) if missing
+  const generateUniqueId = () => {
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+      let result = '';
+      for (let i = 0; i < 8; i++) {
+          result += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      return result;
+  };
 
   // Handle Browser Back Button
   useEffect(() => {
@@ -78,6 +93,10 @@ const App: React.FC = () => {
         }
         if (showWishlist) {
             setShowWishlist(false);
+            return;
+        }
+        if (showExportModal) {
+            setShowExportModal(false);
             return;
         }
 
@@ -97,7 +116,7 @@ const App: React.FC = () => {
     return () => {
         window.removeEventListener('popstate', handlePopState);
     };
-  }, [selectedTrack, view, showWishlist]);
+  }, [selectedTrack, view, showWishlist, showExportModal]);
 
 
   // Helper to save tracks (Optimized for IndexedDB)
@@ -137,6 +156,7 @@ const App: React.FC = () => {
                handleLogout();
                alert("Contraseña cambiada. Inicie sesión nuevamente.");
           } else {
+               // Update current user but preserve session
                setCurrentUser(stillExists);
                localStorage.setItem(AUTH_KEY, JSON.stringify(stillExists));
           }
@@ -171,6 +191,15 @@ const App: React.FC = () => {
                 const savedUser = JSON.parse(savedUserStr);
                 const validUser = currentUsersList.find(u => u.username === savedUser.username && u.password === savedUser.password);
                 if (validUser) {
+                    // MIGRATION: Ensure user has ID if it was created before this update
+                    if (!validUser.uniqueId) {
+                        validUser.uniqueId = generateUniqueId();
+                        // Update in full list
+                        const updatedList = currentUsersList.map(u => u.username === validUser.username ? validUser : u);
+                        currentUsersList = updatedList;
+                        localStorage.setItem(USERS_KEY, JSON.stringify(currentUsersList));
+                    }
+                    
                     setCurrentUser(validUser);
                     setAuthMode(validUser.role);
                     setView(ViewState.LIST);
@@ -187,6 +216,12 @@ const App: React.FC = () => {
   }, []);
 
   const handleLoginSuccess = (user: User) => {
+    // Check if ID exists (legacy users)
+    if (!user.uniqueId) {
+        user.uniqueId = generateUniqueId();
+        updateUsers(users.map(u => u.username === user.username ? user : u));
+    }
+    
     setCurrentUser(user);
     setAuthMode(user.role);
     setView(ViewState.LIST);
@@ -333,10 +368,6 @@ const App: React.FC = () => {
       let currentQuery: any = {};
       let hasStructuredData = false;
       
-      // First Pass: Try to parse structured data (Título:, etc.)
-      // If structured keys are found, we follow that logic.
-      // If lines are simple text, we treat them as Title/Raw search.
-      
       for (const line of lines) {
           const trimmed = line.trim();
           if (!trimmed) continue;
@@ -354,7 +385,6 @@ const App: React.FC = () => {
           } else if (lower.startsWith('autor:')) {
               currentQuery.author = trimmed.split(':')[1].trim();
           } else if (!hasStructuredData) {
-              // Assume unstructured list of songs
               queries.push({ title: trimmed, raw: trimmed });
           }
       }
@@ -393,7 +423,6 @@ const App: React.FC = () => {
               if (!qPerf && !qAuth && q.raw) {
                    const rawNorm = normalize(q.raw);
                    if (tTitle.includes(rawNorm)) score += 10;
-                   // Check if raw query matches title AND artist loosely
                    if (rawNorm.includes(tTitle) && tPerf && rawNorm.includes(tPerf)) score += 15; 
               }
 
@@ -469,12 +498,18 @@ const App: React.FC = () => {
       }
   };
 
+  const handleOpenExportPreview = () => {
+      // Initialize manual entries with missing queries
+      setManualEntries(missingQueries);
+      setShowExportModal(true);
+  };
+
+  // --- EXPORT LOGIC WITH MANUAL ENTRIES ---
   const handleShareWhatsApp = () => {
-      if (selectedTracksList.length === 0) return;
-      
       const today = new Date().toISOString().split('T')[0];
       let message = `*SELECCIÓN MUSICAL RCM - ${today}*\n\n`;
       
+      // Found Tracks
       selectedTracksList.forEach(t => {
           const root = t.path.split('/')[0] || 'Desconocido';
           message += `🎵 ${t.metadata.title || t.filename}\n`;
@@ -482,16 +517,19 @@ const App: React.FC = () => {
           message += `📂 ${root}\n\n`;
       });
 
+      // Manual / Missing Tracks
+      if (manualEntries.length > 0) {
+          message += `*TEMAS NO EN BASE DE DATOS:*\n`;
+          manualEntries.forEach(entry => {
+              if (entry.trim()) message += `❌ ${entry.trim()}\n`;
+          });
+      }
+
       const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
       window.open(url, '_blank');
   };
 
   const handleGenerateSelectionReport = async () => {
-      if (selectedTracksList.length === 0) {
-          alert("No hay canciones seleccionadas para generar el reporte.");
-          return;
-      }
-
       // Generar contador diario
       const today = new Date().toISOString().split('T')[0];
       const storedDate = localStorage.getItem('rcm_daily_date');
@@ -505,15 +543,28 @@ const App: React.FC = () => {
       localStorage.setItem('rcm_daily_date', today);
       localStorage.setItem('rcm_daily_count', count.toString());
 
-      const rows = selectedTracksList.map(t => 
+      // DB Tracks Rows
+      const dbRows = selectedTracksList.map(t => 
           new docx.TableRow({
               children: [
                   new docx.TableCell({ children: [new docx.Paragraph(t.metadata.title || "Desconocido")] }),
                   new docx.TableCell({ children: [new docx.Paragraph(t.metadata.author || "Desconocido")] }),
                   new docx.TableCell({ children: [new docx.Paragraph(t.metadata.performer || "Desconocido")] }),
-                  new docx.TableCell({ children: [new docx.Paragraph(t.path || "")] }), // Changed Year to Path
+                  new docx.TableCell({ children: [new docx.Paragraph(t.path || "")] }), 
               ]
           })
+      );
+
+      // Manual Entries Rows
+      const manualRows = manualEntries.filter(e => e.trim()).map(entry => 
+        new docx.TableRow({
+            children: [
+                new docx.TableCell({ children: [new docx.Paragraph(entry)] }),
+                new docx.TableCell({ children: [new docx.Paragraph("---")] }),
+                new docx.TableCell({ children: [new docx.Paragraph("---")] }),
+                new docx.TableCell({ children: [new docx.Paragraph("NO EN BD")] }), 
+            ]
+        })
       );
 
       const doc = new docx.Document({
@@ -529,14 +580,15 @@ const App: React.FC = () => {
                       width: { size: 100, type: docx.WidthType.PERCENTAGE },
                       rows: [
                           new docx.TableRow({
-                              children: ["Título", "Autor", "Intérprete", "Ruta"].map(t => 
+                              children: ["Título", "Autor", "Intérprete", "Ruta/Estado"].map(t => 
                                   new docx.TableCell({ 
                                       children: [new docx.Paragraph({text: t, bold: true})],
                                       shading: { fill: "EEEEEE" }
                                   })
                               )
                           }),
-                          ...rows
+                          ...dbRows,
+                          ...manualRows
                       ]
                   })
               ]
@@ -547,11 +599,48 @@ const App: React.FC = () => {
           const url = window.URL.createObjectURL(blob);
           const a = document.createElement("a");
           a.href = url;
-          // Filename format: Selección Musical + Fecha + Número de descarga del día
           a.download = `Selección Musical ${today} ${count}.docx`;
           a.click();
           window.URL.revokeObjectURL(url);
       });
+  };
+
+  const handleGenerateDigitalSignature = () => {
+      if (!currentUser) return;
+      
+      const today = new Date().toISOString().split('T')[0];
+      let content = `CERTIFICADO DE SELECCIÓN RCM - DOCUMENTO BLINDADO\n`;
+      content += `--------------------------------------------------\n`;
+      content += `FECHA: ${today}\n`;
+      content += `USUARIO: ${currentUser.fullName}\n`;
+      content += `FIRMA DIGITAL ID: ${currentUser.uniqueId}\n`;
+      content += `--------------------------------------------------\n\n`;
+      
+      content += `[TEMAS SELECCIONADOS DE BASE DE DATOS]\n`;
+      selectedTracksList.forEach((t, i) => {
+           content += `${i + 1}. ${t.metadata.title || t.filename} - ${t.metadata.performer || 'Desc.'} [${t.path}]\n`;
+      });
+      
+      content += `\n[TEMAS NO ENCONTRADOS / AGREGADOS MANUALMENTE]\n`;
+      if (manualEntries.length > 0) {
+          manualEntries.forEach((e, i) => {
+              if (e.trim()) content += `${i + 1}. ${e.trim()}\n`;
+          });
+      } else {
+          content += `(Ninguno)\n`;
+      }
+      
+      content += `\n--------------------------------------------------\n`;
+      content += `FIN DEL DOCUMENTO - NO EDITABLE\n`;
+      content += `Este archivo confirma la solicitud realizada por el usuario portador de la firma.\n`;
+
+      const blob = new Blob([content], { type: 'text/plain' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `FIRMA_DIGITAL_${currentUser.uniqueId}_${today}.txt`;
+      a.click();
+      window.URL.revokeObjectURL(url);
   };
   // -----------------------
 
@@ -607,6 +696,17 @@ const App: React.FC = () => {
                     {/* Saving Indicator */}
                     {isSaving && <span className="size-2 bg-yellow-400 rounded-full animate-pulse" title="Guardando en dispositivo..."></span>}
                     
+                    {/* User ID Button (User Only) */}
+                    {currentUser && authMode !== 'admin' && (
+                        <button 
+                            onClick={() => alert(`TU ID DE FIRMA DIGITAL:\n\n${currentUser.uniqueId}\n\nEste código es único e intransferible.`)}
+                            className="bg-white/10 text-white rounded-full p-1.5 hover:bg-white/20"
+                            title="Ver mi ID de Firma"
+                        >
+                            <span className="material-symbols-outlined text-sm">vpn_key</span>
+                        </button>
+                    )}
+
                     <div className={`text-[10px] font-bold px-2 py-0.5 rounded shadow-sm uppercase ${authMode === 'admin' ? 'bg-miel text-white' : 'bg-green-600 text-white'}`}>
                         {authMode === 'admin' ? 'ADMIN' : 'USER'}
                     </div>
@@ -652,10 +752,10 @@ const App: React.FC = () => {
                         onClearRoot={() => {}} 
                         selectedTrackIds={new Set(selectedTracksList.map(t => t.id))}
                         onToggleSelection={handleToggleSelection}
-                        onDownloadReport={handleGenerateSelectionReport}
+                        // Export hooks now point to modal opener
+                        onOpenExportPreview={handleOpenExportPreview}
                         isSelectionView={true}
                         onClearSelection={handleClearSelection}
-                        onShareWhatsApp={handleShareWhatsApp}
                         
                         onOpenWishlist={() => setShowWishlist(true)}
                         missingQueries={missingQueries}
@@ -709,7 +809,7 @@ const App: React.FC = () => {
                     <p className="text-xs text-gray-500 mb-2">Ingresa hasta 50 temas (uno por línea). Si no se encuentran, podrás buscarlos en YouTube.</p>
                     <textarea 
                         className="w-full h-48 p-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-black/20 text-sm focus:ring-2 focus:ring-primary/20 outline-none resize-none mb-4"
-                        placeholder="Ejemplo:&#10;La Guantanamera&#10;Chan Chan - Compay Segundo&#10;Ojalá"
+                        placeholder="Ejemplo:&#10;Lágrimas Negras - Matamoros (Recomendado: Título - Intérprete)&#10;La Guantanamera&#10;Chan Chan"
                         value={wishlistText}
                         onChange={e => setWishlistText(e.target.value)}
                     ></textarea>
@@ -720,6 +820,79 @@ const App: React.FC = () => {
                         <span className="material-symbols-outlined">search</span>
                         Buscar Temas
                     </button>
+                </div>
+            </div>
+        )}
+
+        {/* EXPORT PREVIEW MODAL */}
+        {showExportModal && (
+            <div className="absolute inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4 animate-fade-in" onClick={() => setShowExportModal(false)}>
+                <div 
+                    className="w-full max-w-md bg-white dark:bg-zinc-900 h-[85vh] sm:h-auto sm:max-h-[85vh] rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col relative overflow-hidden animate-slide-up"
+                    onClick={e => e.stopPropagation()}
+                >
+                     <div className="flex justify-between items-center p-4 border-b border-gray-100 dark:border-gray-800">
+                        <h3 className="text-lg font-bold text-gray-800 dark:text-white">Previsualización Exportación</h3>
+                        <button onClick={() => setShowExportModal(false)} className="text-gray-400">
+                             <span className="material-symbols-outlined">close</span>
+                        </button>
+                    </div>
+                    
+                    <div className="flex-1 overflow-y-auto p-4">
+                        {/* Summary */}
+                        <div className="bg-blue-50 dark:bg-blue-900/10 p-3 rounded-lg mb-4 flex items-center justify-between">
+                            <span className="text-xs font-bold text-blue-800 dark:text-blue-300">Temas de Base de Datos:</span>
+                            <span className="text-sm font-bold bg-white dark:bg-black/20 px-2 rounded">{selectedTracksList.length}</span>
+                        </div>
+
+                        {/* Manual Entries Editor */}
+                        <h4 className="text-xs font-bold text-gray-500 uppercase mb-2 flex items-center gap-1">
+                             <span className="material-symbols-outlined text-sm">edit_note</span>
+                             Editar Temas No Encontrados (Incluir Créditos)
+                        </h4>
+                        
+                        {manualEntries.length === 0 ? (
+                            <p className="text-xs text-gray-400 italic mb-4">No hay temas pendientes.</p>
+                        ) : (
+                            <div className="space-y-2 mb-4">
+                                {manualEntries.map((entry, idx) => (
+                                    <input 
+                                        key={idx}
+                                        value={entry}
+                                        onChange={(e) => {
+                                            const newEntries = [...manualEntries];
+                                            newEntries[idx] = e.target.value;
+                                            setManualEntries(newEntries);
+                                        }}
+                                        className="w-full p-2 text-sm border border-orange-200 dark:border-orange-500/30 rounded bg-orange-50/50 dark:bg-orange-900/10 focus:ring-1 focus:ring-orange-500 outline-none"
+                                        placeholder="Editar: Título - Intérprete"
+                                    />
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="p-4 bg-gray-50 dark:bg-black/20 border-t border-gray-100 dark:border-gray-800 grid grid-cols-2 gap-2">
+                         <button 
+                            onClick={handleShareWhatsApp}
+                            className="bg-[#25D366] text-white py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1 hover:brightness-95"
+                        >
+                            <span className="material-symbols-outlined text-sm">share</span> WhatsApp
+                        </button>
+                         <button 
+                            onClick={handleGenerateSelectionReport}
+                            className="bg-blue-600 text-white py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1 hover:brightness-95"
+                        >
+                            <span className="material-symbols-outlined text-sm">description</span> DOCX
+                        </button>
+                        <button 
+                            onClick={handleGenerateDigitalSignature}
+                            className="col-span-2 bg-gray-800 text-white py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1 hover:bg-black mt-1"
+                        >
+                            <span className="material-symbols-outlined text-sm">verified_user</span> 
+                            Firma Digital (TXT Blindado)
+                        </button>
+                    </div>
                 </div>
             </div>
         )}

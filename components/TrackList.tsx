@@ -14,16 +14,17 @@ interface TrackListProps {
   // Selection Props
   selectedTrackIds?: Set<string>;
   onToggleSelection?: (track: Track) => void;
-  onDownloadReport?: () => void;
   isSelectionView?: boolean;
   onClearSelection?: () => void;
-  onShareWhatsApp?: () => void;
   onBulkSelectTxt?: (file: File) => void;
   
   // Wishlist & Missing Props
   onOpenWishlist?: () => void;
   missingQueries?: string[];
   onClearMissing?: () => void;
+  
+  // New Export Prop
+  onOpenExportPreview?: () => void;
 }
 
 const FIXED_ROOTS = ['Música 1', 'Música 2', 'Música 3', 'Música 4', 'Música 5', 'Otros'];
@@ -34,9 +35,10 @@ type SearchScope = 'global' | 'root';
 const TrackList: React.FC<TrackListProps> = ({ 
     tracks, onSelectTrack, onUploadTxt, isAdmin, 
     onSyncRoot, onExportRoot, onClearRoot,
-    selectedTrackIds, onToggleSelection, onDownloadReport, isSelectionView,
-    onClearSelection, onShareWhatsApp, onBulkSelectTxt,
-    onOpenWishlist, missingQueries, onClearMissing
+    selectedTrackIds, onToggleSelection, isSelectionView,
+    onClearSelection, onBulkSelectTxt,
+    onOpenWishlist, missingQueries, onClearMissing,
+    onOpenExportPreview
 }) => {
   // Input State (Visual)
   const [inputValue, setInputValue] = useState('');
@@ -377,22 +379,13 @@ const TrackList: React.FC<TrackListProps> = ({
                  
                  {tracks.length > 0 && (
                     <div className="flex gap-2">
-                        {onDownloadReport && (
+                        {onOpenExportPreview && (
                             <button 
-                                onClick={onDownloadReport}
-                                className="flex-1 bg-blue-600 text-white text-xs font-bold py-2.5 px-4 rounded-lg flex items-center justify-center gap-1 hover:bg-blue-700 shadow-sm"
+                                onClick={onOpenExportPreview}
+                                className="flex-1 bg-azul-header text-white text-xs font-bold py-2.5 px-4 rounded-lg flex items-center justify-center gap-1 hover:bg-blue-900 shadow-sm"
                             >
-                                <span className="material-symbols-outlined text-sm">download</span>
-                                DOCX
-                            </button>
-                        )}
-                        {onShareWhatsApp && (
-                            <button 
-                                onClick={onShareWhatsApp}
-                                className="flex-1 bg-[#25D366] text-white text-xs font-bold py-2.5 px-4 rounded-lg flex items-center justify-center gap-1 hover:bg-[#20bd5a] shadow-sm"
-                            >
-                                <span className="material-symbols-outlined text-sm">share</span>
-                                WhatsApp
+                                <span className="material-symbols-outlined text-sm">ios_share</span>
+                                Exportar / Compartir
                             </button>
                         )}
                     </div>

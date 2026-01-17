@@ -25,6 +25,7 @@ export interface User {
   role: 'admin' | 'guest'; // 'guest' en código, 'Usuario' en UI
   fullName: string;
   phone: string;
+  uniqueId?: string; // Código único de firma digital
 }
 
 export enum ViewState {
