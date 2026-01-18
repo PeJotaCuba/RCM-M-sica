@@ -159,6 +159,14 @@ const App: React.FC = () => {
         if (savedUserStr) {
             try {
                 const savedUser = JSON.parse(savedUserStr);
+                // Si es un invitado temporal, no lo buscamos en la lista, simplemente restauramos sesión
+                if (savedUser.role === 'guest' && savedUser.username === 'invitado') {
+                     setCurrentUser(savedUser);
+                     setAuthMode('guest');
+                     setView(ViewState.LIST);
+                     return;
+                }
+
                 const validUser = currentUsersList.find(u => u.username === savedUser.username && u.password === savedUser.password);
                 if (validUser) {
                     if (!validUser.uniqueId) {
@@ -180,10 +188,16 @@ const App: React.FC = () => {
   }, []);
 
   const handleLoginSuccess = (user: User) => {
-    if (!user.uniqueId) {
-        user.uniqueId = generateUniqueId(user.fullName);
-        updateUsers(users.map(u => u.username === user.username ? user : u));
+    // Si es un usuario registrado (existe en la lista users), validamos y actualizamos su ID si falta
+    const existingUser = users.find(u => u.username === user.username);
+    if (existingUser) {
+        if (!user.uniqueId) {
+            user.uniqueId = generateUniqueId(user.fullName);
+            updateUsers(users.map(u => u.username === user.username ? user : u));
+        }
     }
+    
+    // Si es invitado o registrado, procedemos
     setCurrentUser(user);
     setAuthMode(user.role);
     setView(ViewState.LIST);
@@ -501,7 +515,7 @@ const App: React.FC = () => {
                         </button>
                     )}
                     <div className={`text-[10px] font-bold px-2 py-0.5 rounded shadow-sm uppercase ${authMode === 'admin' ? 'bg-miel text-white' : 'bg-green-600 text-white'}`}>
-                        {authMode === 'admin' ? 'ADMIN' : 'USER'}
+                        {authMode === 'admin' ? 'ADMIN' : 'INVITADO'}
                     </div>
                     <button onClick={handleLogout} className="text-white bg-white/10 hover:bg-red-500/50 p-2 rounded-full transition-colors flex items-center justify-center size-10">
                         <span className="material-symbols-outlined text-xl">logout</span>
