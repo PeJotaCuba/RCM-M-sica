@@ -158,7 +158,11 @@ const App: React.FC = () => {
   };
 
   const handleAddUser = (u: User) => updateUsers([...users, u]);
-  const handleEditUser = (updatedUser: User) => updateUsers(users.map(u => u.username === updatedUser.username ? updatedUser : u));
+  // Updated signature to allow username change
+  const handleEditUser = (updatedUser: User, originalUsername?: string) => {
+      const targetUsername = originalUsername || updatedUser.username;
+      updateUsers(users.map(u => u.username === targetUsername ? updatedUser : u));
+  };
   const handleDeleteUser = (username: string) => { if (users.length <= 1) return alert("Error"); updateUsers(users.filter(u => u.username !== username)); };
   
   // New Bulk Import Function
@@ -468,7 +472,7 @@ const App: React.FC = () => {
                 </div>
             )}
 
-            {view === ViewState.SETTINGS && authMode === 'admin' && <Settings tracks={tracks} users={users} onAddUser={handleAddUser} onEditUser={handleEditUser} onDeleteUser={handleDeleteUser} onExportUsers={handleExportUsers} onImportUsers={handleImportUsers} />}
+            {view === ViewState.SETTINGS && authMode === 'admin' && <Settings tracks={tracks} users={users} onAddUser={handleAddUser} onEditUser={handleEditUser} onDeleteUser={handleDeleteUser} onExportUsers={handleExportUsers} onImportUsers={handleImportUsers} currentUser={currentUser} />}
             {view === ViewState.PRODUCTIONS && authMode === 'admin' && <Productions onAddTracks={(t) => updateTracks(prev => [...prev, ...t])} allTracks={tracks} />}
             {view === ViewState.REPORTS && authMode === 'director' && <ReportsViewer users={users} onEdit={handleEditReport} />}
             {view === ViewState.RESULTS && selectedTrack && <CreditResults originalTrack={selectedTrack} foundCredits={foundCredits} isLoading={isSearching} onApply={handleApplyCredits} onDiscard={handleDiscardResults} />}

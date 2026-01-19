@@ -7,13 +7,14 @@ interface SettingsProps {
   tracks: Track[];
   users: User[];
   onAddUser: (u: User) => void;
-  onEditUser: (u: User) => void;
+  onEditUser: (u: User, originalUsername?: string) => void;
   onDeleteUser: (username: string) => void;
   onExportUsers: () => void;
   onImportUsers: (users: User[]) => void;
+  currentUser?: User | null;
 }
 
-const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUser, onDeleteUser, onExportUsers, onImportUsers }) => {
+const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUser, onDeleteUser, onExportUsers, onImportUsers, currentUser }) => {
   // Form State
   const [formData, setFormData] = useState({
       username: '',
@@ -26,6 +27,8 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
   });
   const [showPassword, setShowPassword] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [showUserModal, setShowUserModal] = useState(false);
+  const [originalUsername, setOriginalUsername] = useState('');
 
   // Helper to generate Unique ID (> 20 chars)
   const generateUniqueId = (name: string) => {
@@ -104,6 +107,13 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
           username: '', fullName: '', phone: '', password: '', confirmPassword: '', uniqueId: '', role: 'user'
       });
       setIsEditing(false);
+      setShowUserModal(false);
+      setOriginalUsername('');
+  };
+
+  const handleOpenCreate = () => {
+      handleResetForm();
+      setShowUserModal(true);
   };
 
   const handleEditClick = (user: User) => {
@@ -116,7 +126,9 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
           uniqueId: user.uniqueId || '',
           role: user.role
       });
+      setOriginalUsername(user.username);
       setIsEditing(true);
+      setShowUserModal(true);
   };
 
   const handleSubmitUser = () => {
@@ -129,7 +141,8 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
           return;
       }
 
-      if (!isEditing && users.some(u => u.username === formData.username)) {
+      // Validar duplicados (si es nuevo o si se cambió el nombre de usuario)
+      if ((!isEditing || formData.username !== originalUsername) && users.some(u => u.username === formData.username)) {
           alert("El nombre de usuario ya existe.");
           return;
       }
@@ -147,7 +160,7 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
       };
 
       if (isEditing) {
-          onEditUser(userObj);
+          onEditUser(userObj, originalUsername);
           alert("Usuario actualizado correctamente.");
       } else {
           onAddUser(userObj);
@@ -216,7 +229,7 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
 Usuario: ${u.username}
 Contraseña: ${u.password}
 
-Disfruta de nuestras app s en los siguientes enlaces:
+Disfruta de nuestras apps en los siguientes enlaces:
 
 Agenda https://rcmagenda.vercel.app/#/home
 
@@ -230,6 +243,13 @@ Música https://rcm-musica.vercel.app/`;
       if (role === 'admin') return 'Coordinador';
       if (role === 'director') return 'Director';
       return 'Usuario';
+  };
+
+  // Check if current logged-in user or admin to prevent deletion
+  const canDelete = (u: User) => {
+      if (u.username === 'admin') return false;
+      if (currentUser && u.username === currentUser.username) return false;
+      return true;
   };
 
   return (
@@ -273,51 +293,19 @@ Música https://rcm-musica.vercel.app/`;
                     </div>
                 </div>
                 
-                <div className="grid gap-3 mb-6 bg-gray-50 dark:bg-black/20 p-4 rounded-lg">
-                    <div className="flex justify-between items-center mb-2">
-                        <h4 className="text-xs font-bold text-gray-500 uppercase">{isEditing ? `Editando: ${formData.username}` : 'Crear Nuevo Usuario'}</h4>
-                        {isEditing && <button onClick={handleResetForm} className="text-xs text-red-500 font-bold hover:underline">Cancelar</button>}
-                    </div>
-                    
-                    <div className="grid grid-cols-2 gap-3">
-                         <input placeholder="Nombre Completo *" value={formData.fullName} onChange={e => setFormData({...formData, fullName: e.target.value})} className="p-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 text-sm" />
-                        <input placeholder="Teléfono" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="p-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 text-sm" />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                        <input placeholder="Nombre de Usuario (Login) *" value={formData.username} disabled={isEditing} onChange={e => setFormData({...formData, username: e.target.value})} className={`p-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 text-sm ${isEditing ? 'opacity-50' : ''}`} />
-                        <input placeholder="Firma Digital (Solo Lectura/Admin)" value={formData.uniqueId} onChange={e => setFormData({...formData, uniqueId: e.target.value})} className="p-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 text-sm font-mono" />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3 relative">
-                        <input type={showPassword ? "text" : "password"} placeholder="Contraseña *" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} className="w-full p-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 text-sm" />
-                         <input type={showPassword ? "text" : "password"} placeholder="Confirmar Contraseña *" value={formData.confirmPassword} onChange={e => setFormData({...formData, confirmPassword: e.target.value})} className="w-full p-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 text-sm" />
-                        <button onClick={() => setShowPassword(!showPassword)} className="absolute right-[-30px] top-2 text-gray-400"><span className="material-symbols-outlined text-sm">{showPassword ? 'visibility_off' : 'visibility'}</span></button>
-                    </div>
-
-                    <div className="flex gap-4 items-center mt-2 flex-wrap">
-                        <label className="flex items-center gap-2 cursor-pointer bg-white dark:bg-white/5 px-2 py-1 rounded border border-gray-100 dark:border-white/5">
-                            <input type="radio" name="role" checked={formData.role === 'admin'} onChange={() => setFormData({...formData, role: 'admin'})} />
-                            <span className="text-xs font-bold text-miel">Coordinador (Admin)</span>
-                        </label>
-                        <label className="flex items-center gap-2 cursor-pointer bg-white dark:bg-white/5 px-2 py-1 rounded border border-gray-100 dark:border-white/5">
-                            <input type="radio" name="role" checked={formData.role === 'director'} onChange={() => setFormData({...formData, role: 'director'})} />
-                            <span className="text-xs font-bold text-azul-header dark:text-blue-400">Director</span>
-                        </label>
-                        <label className="flex items-center gap-2 cursor-pointer bg-white dark:bg-white/5 px-2 py-1 rounded border border-gray-100 dark:border-white/5">
-                            <input type="radio" name="role" checked={formData.role === 'user'} onChange={() => setFormData({...formData, role: 'user'})} />
-                            <span className="text-xs font-bold text-gray-600 dark:text-gray-400">Usuario</span>
-                        </label>
-                    </div>
-
-                    <button onClick={handleSubmitUser} className={`text-white text-sm font-bold py-2 rounded mt-2 ${isEditing ? 'bg-miel hover:bg-yellow-600' : 'bg-azul-header hover:bg-blue-900'}`}>
-                        {isEditing ? 'Guardar Cambios' : 'Crear Usuario'}
-                    </button>
-                </div>
-
                 <div>
-                    <h4 className="text-xs font-bold text-gray-500 uppercase mb-2">Lista de Usuarios</h4>
-                    <div className="space-y-2 max-h-60 overflow-y-auto">
+                    <div className="flex justify-between items-center mb-4">
+                        <h4 className="text-xs font-bold text-gray-500 uppercase">Lista de Usuarios</h4>
+                        <button 
+                            onClick={handleOpenCreate} 
+                            className="text-white bg-primary hover:bg-primary-dark text-xs font-bold px-3 py-1.5 rounded flex items-center gap-1"
+                        >
+                            <span className="material-symbols-outlined text-sm">add</span>
+                            Agregar Usuario Manualmente
+                        </button>
+                    </div>
+
+                    <div className="space-y-2 max-h-96 overflow-y-auto">
                         {users.map(u => (
                             <div key={u.username} className="flex flex-col p-3 bg-gray-50 dark:bg-white/5 rounded border border-gray-100 dark:border-white/5 gap-2">
                                 <div className="flex items-center justify-between">
@@ -329,7 +317,9 @@ Música https://rcm-musica.vercel.app/`;
                                     <div className="flex gap-2">
                                         <button onClick={() => handleShareWhatsApp(u)} className="text-green-500 hover:text-green-600" title="Enviar credenciales"><span className="material-symbols-outlined text-lg">chat</span></button>
                                         <button onClick={() => handleEditClick(u)} className="text-primary hover:text-primary-dark"><span className="material-symbols-outlined text-lg">edit</span></button>
-                                        <button onClick={() => onDeleteUser(u.username)} className="text-red-400 hover:text-red-600"><span className="material-symbols-outlined text-lg">delete</span></button>
+                                        {canDelete(u) && (
+                                            <button onClick={() => onDeleteUser(u.username)} className="text-red-400 hover:text-red-600"><span className="material-symbols-outlined text-lg">delete</span></button>
+                                        )}
                                     </div>
                                 </div>
                                 <div className="text-xs text-gray-500 flex flex-wrap gap-4">
@@ -343,6 +333,55 @@ Música https://rcm-musica.vercel.app/`;
                 </div>
             </div>
         </div>
+
+        {/* MODAL USER FORM */}
+        {showUserModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in" onClick={handleResetForm}>
+                <div className="w-full max-w-md bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl p-6" onClick={e => e.stopPropagation()}>
+                    <div className="flex justify-between items-center mb-4 border-b border-gray-100 dark:border-white/10 pb-2">
+                        <h4 className="text-sm font-bold text-gray-800 dark:text-white uppercase">{isEditing ? `Editando: ${formData.username}` : 'Crear Nuevo Usuario'}</h4>
+                        <button onClick={handleResetForm} className="text-gray-400 hover:text-red-500"><span className="material-symbols-outlined">close</span></button>
+                    </div>
+
+                    <div className="space-y-4">
+                        <div className="grid grid-cols-2 gap-3">
+                             <input placeholder="Nombre Completo *" value={formData.fullName} onChange={e => setFormData({...formData, fullName: e.target.value})} className="p-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 text-sm" />
+                            <input placeholder="Teléfono" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="p-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 text-sm" />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                            <input placeholder="Nombre de Usuario (Login) *" value={formData.username} onChange={e => setFormData({...formData, username: e.target.value})} className="p-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 text-sm" />
+                            <input placeholder="Firma Digital (Solo Lectura/Admin)" value={formData.uniqueId} onChange={e => setFormData({...formData, uniqueId: e.target.value})} className="p-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 text-sm font-mono" />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3 relative">
+                            <input type={showPassword ? "text" : "password"} placeholder="Contraseña *" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} className="w-full p-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 text-sm" />
+                             <input type={showPassword ? "text" : "password"} placeholder="Confirmar Contraseña *" value={formData.confirmPassword} onChange={e => setFormData({...formData, confirmPassword: e.target.value})} className="w-full p-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 text-sm" />
+                            <button onClick={() => setShowPassword(!showPassword)} className="absolute right-[-30px] top-2 text-gray-400"><span className="material-symbols-outlined text-sm">{showPassword ? 'visibility_off' : 'visibility'}</span></button>
+                        </div>
+
+                        <div className="flex gap-4 items-center mt-2 flex-wrap">
+                            <label className="flex items-center gap-2 cursor-pointer bg-white dark:bg-white/5 px-2 py-1 rounded border border-gray-100 dark:border-white/5">
+                                <input type="radio" name="role" checked={formData.role === 'admin'} onChange={() => setFormData({...formData, role: 'admin'})} />
+                                <span className="text-xs font-bold text-miel">Coordinador</span>
+                            </label>
+                            <label className="flex items-center gap-2 cursor-pointer bg-white dark:bg-white/5 px-2 py-1 rounded border border-gray-100 dark:border-white/5">
+                                <input type="radio" name="role" checked={formData.role === 'director'} onChange={() => setFormData({...formData, role: 'director'})} />
+                                <span className="text-xs font-bold text-azul-header dark:text-blue-400">Director</span>
+                            </label>
+                            <label className="flex items-center gap-2 cursor-pointer bg-white dark:bg-white/5 px-2 py-1 rounded border border-gray-100 dark:border-white/5">
+                                <input type="radio" name="role" checked={formData.role === 'user'} onChange={() => setFormData({...formData, role: 'user'})} />
+                                <span className="text-xs font-bold text-gray-600 dark:text-gray-400">Usuario</span>
+                            </label>
+                        </div>
+
+                        <button onClick={handleSubmitUser} className={`w-full text-white text-sm font-bold py-3 rounded mt-2 shadow-lg ${isEditing ? 'bg-miel hover:bg-yellow-600' : 'bg-azul-header hover:bg-blue-900'}`}>
+                            {isEditing ? 'Guardar Cambios' : 'Crear Usuario'}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
     </div>
   );
 };
