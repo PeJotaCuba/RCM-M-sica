@@ -27,53 +27,40 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
   const [isEditing, setIsEditing] = useState(false);
 
   // Helper to generate Unique ID (> 20 chars)
-  // Format: RCM-[NAME_SANITIZED]-[RANDOM_STRING]
   const generateUniqueId = (name: string) => {
-      // 1. Clean name (remove spaces, special chars), uppercase, max 10 chars
       const cleanName = name ? name.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().substring(0, 10) : 'USR';
-      
-      // 2. Generate Random String
       const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
       let random = '';
-      // Ensure total length is always > 20. 
-      // Prefix (4) + Name (max 10) + Hyphens (2) = ~16 chars used. 
-      // Adding 16 random chars ensures safely > 25 chars total.
       for (let i = 0; i < 16; i++) {
           random += chars.charAt(Math.floor(Math.random() * chars.length));
       }
-      
       return `RCM-${cleanName}-${random}`;
   };
 
-  // --- STATS DOWNLOAD (2 SHEETS) ---
+  // Helper to generate Auto Password
+  // Format: RadioCiudad + UserIndex + YearLast2Digits
+  const generateAutoPassword = () => {
+      const yearSuffix = new Date().getFullYear().toString().slice(-2);
+      // We use users.length + 1 for the ID logic, ensuring it grows.
+      const userId = users.length + 1;
+      return `RadioCiudad${userId}${yearSuffix}`;
+  };
+
   const downloadCreditStats = () => {
-      // 1. Gather Data
-      // Use verified tracks ideally, or all tracks if preferred. Using all for general stats per request.
       const dataTracks = tracks; 
-      
       if (dataTracks.length === 0) {
           alert("No hay pistas en la base de datos.");
           return;
       }
-
-      // --- SHEET 1: RESUMEN ESTADÍSTICO ---
-      
-      // Totals
+      // ... (Resto del código de estadísticas igual que antes) ...
       const totalTracks = dataTracks.length;
-      
-      // Helper for counts
       const countUnique = (field: keyof typeof dataTracks[0]['metadata']) => {
           const s = new Set<string>();
-          dataTracks.forEach(t => {
-              if (t.metadata[field] && t.metadata[field] !== 'Desconocido') s.add(t.metadata[field] as string);
-          });
+          dataTracks.forEach(t => { if (t.metadata[field] && t.metadata[field] !== 'Desconocido') s.add(t.metadata[field] as string); });
           return s.size;
       };
-      
       const totalAuthors = countUnique('author');
       const totalPerformers = countUnique('performer');
-
-      // Helper for distribution tables
       const getDistribution = (field: keyof typeof dataTracks[0]['metadata']) => {
           const counts: Record<string, number> = {};
           dataTracks.forEach(t => {
@@ -87,7 +74,6 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
       const authorCountries = getDistribution('authorCountry');
       const performerCountries = getDistribution('performerCountry');
 
-      // Construct Sheet 1 Rows
       const sheet1Rows: any[] = [];
       sheet1Rows.push(["REPORTE GENERAL DE ESTADÍSTICAS RCM"]);
       sheet1Rows.push([""]);
@@ -97,22 +83,17 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
       sheet1Rows.push(["Cantidad de Intérpretes Únicos", totalPerformers]);
       sheet1Rows.push([""]);
       
-      // Append Distribution Tables side-by-side or vertically? Vertically is safer for dynamic lengths.
-      
       const addSection = (title: string, data: [string, number][], header1: string) => {
           sheet1Rows.push([title]);
           sheet1Rows.push([header1, "Cantidad"]);
           data.forEach(([key, val]) => sheet1Rows.push([key, val]));
           sheet1Rows.push([""]);
       };
-
       addSection("GÉNEROS MUSICALES", genres, "Género");
       addSection("PAÍSES DE AUTORES", authorCountries, "País");
       addSection("PAÍSES DE INTÉRPRETES", performerCountries, "País");
 
       const ws1 = XLSX.utils.aoa_to_sheet(sheet1Rows);
-
-      // --- SHEET 2: DETALLE COMPLETO ---
       const detailData = dataTracks.map(t => ({
           Título: t.metadata.title,
           Autor: t.metadata.author,
@@ -120,16 +101,12 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
           Ruta: t.path
       }));
       const ws2 = XLSX.utils.json_to_sheet(detailData);
-
-      // --- WORKBOOK ASSEMBLY ---
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, ws1, "Estadísticas");
       XLSX.utils.book_append_sheet(workbook, ws2, "Detalle de Temas");
-      
       XLSX.writeFile(workbook, "RCM_Reporte_Completo.xlsx");
   };
 
-  // --- USER MANAGEMENT ---
   const handleResetForm = () => {
       setFormData({
           username: '', fullName: '', phone: '', password: '', confirmPassword: '', uniqueId: '', role: 'guest'
@@ -151,28 +128,33 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
   };
 
   const handleSubmitUser = () => {
-      // Validation
-      if (!formData.username || !formData.password || !formData.fullName) {
-          alert("Todos los campos marcados son obligatorios.");
-          return;
-      }
-      if (formData.password !== formData.confirmPassword) {
-          alert("Las contraseñas no coinciden.");
-          return;
+      // Auto-generate password if empty and creating new
+      let finalPassword = formData.password;
+      if (!isEditing && !finalPassword) {
+          finalPassword = generateAutoPassword();
+          // Also set confirm so validation passes if we were to check, but we skip validation for auto
+      } else {
+          // Validation only if manual entry
+           if (!formData.username || !finalPassword || !formData.fullName) {
+              alert("Todos los campos marcados son obligatorios.");
+              return;
+          }
+          if (finalPassword !== formData.confirmPassword) {
+              alert("Las contraseñas no coinciden.");
+              return;
+          }
       }
 
-      // Check existence (only if creating new, not editing self/others)
       if (!isEditing && users.some(u => u.username === formData.username)) {
           alert("El nombre de usuario ya existe.");
           return;
       }
 
-      // Generate ID if empty
       const finalUniqueId = formData.uniqueId.trim() || generateUniqueId(formData.fullName);
 
       const userObj: User = {
           username: formData.username,
-          password: formData.password,
+          password: finalPassword,
           role: formData.role,
           fullName: formData.fullName,
           phone: formData.phone,
@@ -184,7 +166,7 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
           alert("Usuario actualizado correctamente.");
       } else {
           onAddUser(userObj);
-          alert("Usuario creado correctamente.");
+          alert(`Usuario creado correctamente.\nContraseña Generada: ${finalPassword}`);
       }
       handleResetForm();
   };
@@ -194,16 +176,11 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
         <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Ajustes de Administrador</h2>
         
         <div className="space-y-8">
-            
-            {/* 1. Statistics */}
             <div className="bg-white dark:bg-white/5 p-6 rounded-xl border border-gray-200 dark:border-white/10 shadow-sm">
                 <div className="flex items-center gap-3 mb-4 text-azul-header dark:text-blue-400">
                     <span className="material-symbols-outlined">bar_chart</span>
                     <h3 className="font-bold">Base de Datos (Excel)</h3>
                 </div>
-                <p className="text-sm text-gray-500 mb-4">
-                    Descarga un reporte con dos hojas: Resumen Estadístico (Totales, Géneros, Países) y Detalle de Temas.
-                </p>
                 <button 
                     onClick={downloadCreditStats}
                     className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition-colors"
@@ -213,93 +190,47 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
                 </button>
             </div>
 
-            {/* 2. User Management */}
             <div className="bg-white dark:bg-white/5 p-6 rounded-xl border border-gray-200 dark:border-white/10 shadow-sm">
                 <div className="flex items-center gap-3 mb-4 justify-between">
                     <div className="flex items-center gap-3 text-primary">
                         <span className="material-symbols-outlined">manage_accounts</span>
                         <h3 className="font-bold">Gestión de Usuarios</h3>
                     </div>
-                    {/* Botón para guardar musuarios.json */}
                     <button 
                         onClick={onExportUsers}
                         className="bg-azul-header text-white text-[10px] font-bold uppercase px-3 py-1.5 rounded flex items-center gap-1 hover:bg-blue-900"
-                        title="Guardar usuarios a musuarios.json"
                     >
                         <span className="material-symbols-outlined text-xs">save</span>
                         Guardar DB
                     </button>
                 </div>
                 
-                {/* Form */}
                 <div className="grid gap-3 mb-6 bg-gray-50 dark:bg-black/20 p-4 rounded-lg">
                     <div className="flex justify-between items-center mb-2">
                         <h4 className="text-xs font-bold text-gray-500 uppercase">{isEditing ? `Editando: ${formData.username}` : 'Crear Nuevo Usuario'}</h4>
-                        {isEditing && (
-                            <button onClick={handleResetForm} className="text-xs text-red-500 font-bold hover:underline">Cancelar Edición</button>
-                        )}
+                        {isEditing && <button onClick={handleResetForm} className="text-xs text-red-500 font-bold hover:underline">Cancelar</button>}
                     </div>
                     
                     <div className="grid grid-cols-2 gap-3">
-                         <input 
-                            placeholder="Nombre Completo *" 
-                            value={formData.fullName}
-                            onChange={e => setFormData({...formData, fullName: e.target.value})}
-                            className="p-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 text-sm"
-                        />
-                        <input 
-                            placeholder="Teléfono" 
-                            value={formData.phone}
-                            onChange={e => setFormData({...formData, phone: e.target.value})}
-                            className="p-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 text-sm"
-                        />
+                         <input placeholder="Nombre Completo *" value={formData.fullName} onChange={e => setFormData({...formData, fullName: e.target.value})} className="p-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 text-sm" />
+                        <input placeholder="Teléfono" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="p-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 text-sm" />
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
-                        <input 
-                            placeholder="Nombre de Usuario (Login) *" 
-                            value={formData.username}
-                            disabled={isEditing} 
-                            onChange={e => setFormData({...formData, username: e.target.value})}
-                            className={`p-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 text-sm ${isEditing ? 'opacity-50' : ''}`}
-                        />
-                        <input 
-                            placeholder="Firma Digital (Auto si vacío)" 
-                            value={formData.uniqueId}
-                            onChange={e => setFormData({...formData, uniqueId: e.target.value})}
-                            className="p-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 text-sm font-mono"
-                        />
+                        <input placeholder="Nombre de Usuario (Login) *" value={formData.username} disabled={isEditing} onChange={e => setFormData({...formData, username: e.target.value})} className={`p-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 text-sm ${isEditing ? 'opacity-50' : ''}`} />
+                        <input placeholder="Firma Digital (Auto si vacío)" value={formData.uniqueId} onChange={e => setFormData({...formData, uniqueId: e.target.value})} className="p-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 text-sm font-mono" />
                     </div>
 
+                    {!isEditing && <p className="text-[10px] text-gray-400 mt-1">Nota: Si deja la contraseña vacía, se generará automáticamente (RadioCiudad + # + Año).</p>}
                     <div className="grid grid-cols-2 gap-3 relative">
-                        <input 
-                            type={showPassword ? "text" : "password"}
-                            placeholder="Contraseña *" 
-                            value={formData.password}
-                            onChange={e => setFormData({...formData, password: e.target.value})}
-                            className="w-full p-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 text-sm"
-                        />
-                         <input 
-                            type={showPassword ? "text" : "password"}
-                            placeholder="Confirmar Contraseña *" 
-                            value={formData.confirmPassword}
-                            onChange={e => setFormData({...formData, confirmPassword: e.target.value})}
-                            className="w-full p-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 text-sm"
-                        />
-                        <button onClick={() => setShowPassword(!showPassword)} className="absolute right-[-30px] top-2 text-gray-400">
-                             <span className="material-symbols-outlined text-sm">{showPassword ? 'visibility_off' : 'visibility'}</span>
-                        </button>
+                        <input type={showPassword ? "text" : "password"} placeholder="Contraseña *" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} className="w-full p-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 text-sm" />
+                         <input type={showPassword ? "text" : "password"} placeholder="Confirmar Contraseña *" value={formData.confirmPassword} onChange={e => setFormData({...formData, confirmPassword: e.target.value})} className="w-full p-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 text-sm" />
+                        <button onClick={() => setShowPassword(!showPassword)} className="absolute right-[-30px] top-2 text-gray-400"><span className="material-symbols-outlined text-sm">{showPassword ? 'visibility_off' : 'visibility'}</span></button>
                     </div>
 
                     <div className="flex gap-4 items-center mt-1">
-                        <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="radio" name="role" checked={formData.role === 'guest'} onChange={() => setFormData({...formData, role: 'guest'})} />
-                            <span className="text-sm">Usuario</span>
-                        </label>
-                        <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="radio" name="role" checked={formData.role === 'admin'} onChange={() => setFormData({...formData, role: 'admin'})} />
-                            <span className="text-sm">Administrador</span>
-                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer"><input type="radio" name="role" checked={formData.role === 'guest'} onChange={() => setFormData({...formData, role: 'guest'})} /><span className="text-sm">Usuario</span></label>
+                        <label className="flex items-center gap-2 cursor-pointer"><input type="radio" name="role" checked={formData.role === 'admin'} onChange={() => setFormData({...formData, role: 'admin'})} /><span className="text-sm">Administrador</span></label>
                     </div>
 
                     <button onClick={handleSubmitUser} className={`text-white text-sm font-bold py-2 rounded mt-2 ${isEditing ? 'bg-miel hover:bg-yellow-600' : 'bg-azul-header hover:bg-blue-900'}`}>
@@ -307,7 +238,6 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
                     </button>
                 </div>
 
-                {/* User List */}
                 <div>
                     <h4 className="text-xs font-bold text-gray-500 uppercase mb-2">Lista de Usuarios</h4>
                     <div className="space-y-2 max-h-60 overflow-y-auto">
@@ -320,17 +250,14 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
                                         <span className="text-[10px] text-gray-400 uppercase">({u.role === 'guest' ? 'Usuario' : 'Admin'})</span>
                                     </div>
                                     <div className="flex gap-2">
-                                         <button onClick={() => handleEditClick(u)} className="text-primary hover:text-primary-dark" title="Editar">
-                                            <span className="material-symbols-outlined text-lg">edit</span>
-                                        </button>
-                                        <button onClick={() => onDeleteUser(u.username)} className="text-red-400 hover:text-red-600" title="Eliminar">
-                                            <span className="material-symbols-outlined text-lg">delete</span>
-                                        </button>
+                                         <button onClick={() => handleEditClick(u)} className="text-primary hover:text-primary-dark"><span className="material-symbols-outlined text-lg">edit</span></button>
+                                        <button onClick={() => onDeleteUser(u.username)} className="text-red-400 hover:text-red-600"><span className="material-symbols-outlined text-lg">delete</span></button>
                                     </div>
                                 </div>
                                 <div className="text-xs text-gray-500 flex flex-wrap gap-4">
                                     <span><span className="font-bold">Nombre:</span> {u.fullName || '---'}</span>
                                     <span><span className="font-bold">ID:</span> {u.uniqueId || '---'}</span>
+                                    <span><span className="font-bold">Clave:</span> {u.password}</span>
                                 </div>
                             </div>
                         ))}

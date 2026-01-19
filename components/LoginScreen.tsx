@@ -17,12 +17,12 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, users, onUpda
 
   const handleLoginSubmit = () => {
     if (!identifier || !password) {
-        setError("Por favor ingrese credenciales");
+        setError("Por favor ingrese sus credenciales");
         return;
     }
 
     const user = users.find(u => 
-        (u.username === identifier || u.phone === identifier) && 
+        (u.username.toLowerCase() === identifier.toLowerCase() || u.phone === identifier) && 
         u.password === password
     );
     
@@ -32,19 +32,6 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, users, onUpda
         setError("Usuario o Contraseña incorrectos");
         setPassword('');
     }
-  };
-
-  const handleGuestAccess = () => {
-      // Create a temporary guest user
-      const guestUser: User = {
-          username: 'invitado',
-          password: '',
-          role: 'guest',
-          fullName: 'Invitado',
-          phone: '',
-          uniqueId: `GUEST-${Date.now()}` // Temporary session ID
-      };
-      onLoginSuccess(guestUser);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -59,7 +46,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, users, onUpda
        
        <div className="flex-1 flex flex-col items-center justify-center p-6 z-10 w-full overflow-y-auto">
           <div className="w-full max-w-sm flex flex-col items-center space-y-6 my-auto bg-white dark:bg-zinc-900 p-8 rounded-2xl shadow-xl border border-gray-100 dark:border-white/5">
-             <div className="text-center">
+             <div className="text-center mb-4">
                 <div className="w-24 h-24 mx-auto mb-4 relative flex items-center justify-center">
                    <div className="w-full h-full flex flex-col items-center justify-center bg-white/10 rounded-full border-4 border-miel/30 shadow-lg animate-fade-in">
                        <span className="material-symbols-outlined text-5xl text-primary drop-shadow-md">
@@ -68,51 +55,37 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, users, onUpda
                    </div>
                 </div>
                 <h1 className="text-2xl font-bold text-gray-900 dark:text-white tracking-tight">RCM Música</h1>
+                <p className="text-xs text-gray-400 mt-1 font-medium uppercase tracking-widest">Acceso Restringido</p>
              </div>
 
-             {/* ACCESO INVITADO (Principal) */}
-             <div className="w-full">
-                 <button 
-                     onClick={handleGuestAccess}
-                     className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-4 rounded-xl shadow-lg transform active:scale-95 transition-all flex items-center justify-center gap-2 group"
-                 >
-                     <span className="material-symbols-outlined text-2xl group-hover:scale-110 transition-transform">public</span>
-                     <span className="text-lg">Entrar como Invitado</span>
-                 </button>
-                 <p className="text-center text-[10px] text-gray-400 mt-2">Acceso limitado de solo lectura y búsqueda</p>
-             </div>
-
-             <div className="relative flex py-2 items-center w-full">
-                <div className="flex-grow border-t border-gray-200 dark:border-gray-700"></div>
-                <span className="flex-shrink-0 mx-4 text-gray-400 text-[10px] uppercase font-bold">Acceso Administrativo</span>
-                <div className="flex-grow border-t border-gray-200 dark:border-gray-700"></div>
-             </div>
-
-             {/* ACCESO ADMIN (Secundario) */}
-             <div className="w-full space-y-3 bg-gray-50 dark:bg-black/20 p-4 rounded-xl border border-gray-100 dark:border-white/5">
+             {/* FORMULARIO DE ACCESO */}
+             <div className="w-full space-y-4">
                  <div>
+                     <label className="block text-xs font-bold text-gray-500 mb-1 ml-1">Usuario</label>
                      <div className="relative">
                          <span className="material-symbols-outlined absolute left-3 top-2.5 text-gray-400 text-lg">person</span>
                          <input 
                             type="text"
-                            placeholder="Usuario Admin"
-                            className="w-full pl-9 pr-4 py-2 rounded-lg bg-white dark:bg-zinc-800 border border-gray-200 dark:border-gray-600 focus:border-azul-header focus:ring-1 focus:ring-azul-header outline-none transition-all text-sm"
+                            placeholder="Nombre de usuario"
+                            className="w-full pl-9 pr-4 py-3 rounded-xl bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-gray-700 focus:border-azul-header focus:ring-1 focus:ring-azul-header outline-none transition-all text-sm"
                             value={identifier}
                             onChange={(e) => {
                                 setIdentifier(e.target.value);
                                 setError('');
                             }}
+                            onKeyDown={handleKeyDown}
                          />
                      </div>
                  </div>
 
                  <div>
+                     <label className="block text-xs font-bold text-gray-500 mb-1 ml-1">Contraseña</label>
                      <div className="relative">
                          <span className="material-symbols-outlined absolute left-3 top-2.5 text-gray-400 text-lg">lock</span>
                          <input 
                             type={showPassword ? "text" : "password"}
-                            placeholder="Contraseña"
-                            className="w-full pl-9 pr-9 py-2 rounded-lg bg-white dark:bg-zinc-800 border border-gray-200 dark:border-gray-600 focus:border-azul-header focus:ring-1 focus:ring-azul-header outline-none transition-all text-sm"
+                            placeholder="••••••••"
+                            className="w-full pl-9 pr-9 py-3 rounded-xl bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-gray-700 focus:border-azul-header focus:ring-1 focus:ring-azul-header outline-none transition-all text-sm"
                             value={password}
                             onChange={(e) => {
                                 setPassword(e.target.value);
@@ -132,29 +105,36 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, users, onUpda
                      </div>
                  </div>
                  
-                 {error && <p className="text-red-500 text-[10px] text-center font-bold bg-red-50 p-1 rounded animate-pulse">{error}</p>}
+                 {error && (
+                    <div className="flex items-center gap-2 text-red-500 bg-red-50 dark:bg-red-900/10 p-2 rounded-lg justify-center animate-pulse">
+                        <span className="material-symbols-outlined text-sm">error</span>
+                        <p className="text-[10px] font-bold">{error}</p>
+                    </div>
+                 )}
 
                  <button 
                      onClick={handleLoginSubmit}
-                     className="w-full bg-azul-header hover:bg-opacity-90 text-white font-bold py-2 rounded-lg text-sm flex items-center justify-center gap-2"
+                     className="w-full bg-azul-header hover:bg-opacity-90 text-white font-bold py-3.5 rounded-xl text-sm flex items-center justify-center gap-2 shadow-lg hover:shadow-xl transition-all active:scale-95"
                  >
-                     <span>Entrar como Admin</span>
+                     <span>Iniciar Sesión</span>
+                     <span className="material-symbols-outlined text-lg">login</span>
                  </button>
              </div>
 
-             {/* Sync Button (Solo visible si es necesario, o movido abajo) */}
-             <button 
-                 onClick={onUpdateUsers}
-                 disabled={isUpdating}
-                 className="text-[10px] text-gray-400 hover:text-azul-cauto flex items-center gap-1 transition-colors"
-             >
-                 <span className={`material-symbols-outlined text-sm ${isUpdating ? 'animate-spin' : ''}`}>sync</span>
-                 <span>{isUpdating ? 'Sincronizando...' : 'Sincronizar usuarios'}</span>
-             </button>
+             <div className="pt-4 border-t border-gray-100 dark:border-white/5 w-full flex justify-center">
+                 <button 
+                     onClick={onUpdateUsers}
+                     disabled={isUpdating}
+                     className="text-[10px] text-gray-400 hover:text-azul-cauto flex items-center gap-1.5 transition-colors"
+                 >
+                     <span className={`material-symbols-outlined text-base ${isUpdating ? 'animate-spin' : ''}`}>sync</span>
+                     <span>{isUpdating ? 'Actualizando base de datos...' : 'Sincronizar usuarios'}</span>
+                 </button>
+             </div>
           </div>
        </div>
 
-       {/* Footer / Disclaimer */}
+       {/* Footer */}
        <div className="p-4 text-center text-[10px] text-gray-400 font-medium">
             Radio Ciudad Monumento &copy; {new Date().getFullYear()}
        </div>

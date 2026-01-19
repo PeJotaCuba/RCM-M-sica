@@ -28,13 +28,23 @@ export interface User {
   uniqueId?: string; // Código único de firma digital
 }
 
+export interface Report {
+    id: string;
+    date: string;
+    program: string;
+    generatedBy: string;
+    fileName: string;
+    pdfBlob: Blob; // Almacenado en IndexedDB
+}
+
 export enum ViewState {
   LOGIN = 'LOGIN',
   LIST = 'LIST',
   SETTINGS = 'SETTINGS',
   RESULTS = 'RESULTS',
   SELECTION = 'SELECTION',
-  PRODUCTIONS = 'PRODUCTIONS'
+  PRODUCTIONS = 'PRODUCTIONS',
+  REPORTS = 'REPORTS'
 }
 
 export type FilterType = 'title' | 'author' | 'performer' | 'folder';

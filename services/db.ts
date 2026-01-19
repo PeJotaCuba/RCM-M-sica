@@ -1,9 +1,10 @@
 
-import { Track } from '../types';
+import { Track, Report } from '../types';
 
 const DB_NAME = 'RCM_Music_DB';
-const STORE_NAME = 'tracks';
-const DB_VERSION = 1;
+const TRACKS_STORE = 'tracks';
+const REPORTS_STORE = 'reports';
+const DB_VERSION = 2; // Increment version to add new store
 
 const openDB = (): Promise<IDBDatabase> => {
     return new Promise((resolve, reject) => {
@@ -16,23 +17,26 @@ const openDB = (): Promise<IDBDatabase> => {
         request.onsuccess = () => resolve(request.result);
         request.onupgradeneeded = (event) => {
             const db = (event.target as IDBOpenDBRequest).result;
-            if (!db.objectStoreNames.contains(STORE_NAME)) {
-                // Creamos el store usando 'id' como clave única
-                db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+            
+            if (!db.objectStoreNames.contains(TRACKS_STORE)) {
+                db.createObjectStore(TRACKS_STORE, { keyPath: 'id' });
+            }
+            if (!db.objectStoreNames.contains(REPORTS_STORE)) {
+                db.createObjectStore(REPORTS_STORE, { keyPath: 'id' });
             }
         };
     });
 };
 
+// --- TRACKS OPERATIONS ---
+
 export const saveTracksToDB = async (tracks: Track[]): Promise<void> => {
     try {
         const db = await openDB();
         return new Promise((resolve, reject) => {
-            const tx = db.transaction(STORE_NAME, 'readwrite');
-            const store = tx.objectStore(STORE_NAME);
+            const tx = db.transaction(TRACKS_STORE, 'readwrite');
+            const store = tx.objectStore(TRACKS_STORE);
             
-            // Estrategia: Limpiar y reescribir para mantener sincronía total con el estado de la App.
-            // Esto es seguro porque el estado de React es la "verdad" actual.
             const clearReq = store.clear();
             
             clearReq.onsuccess = () => {
@@ -40,11 +44,7 @@ export const saveTracksToDB = async (tracks: Track[]): Promise<void> => {
                     resolve();
                     return;
                 }
-                
-                // Insertar registros
-                tracks.forEach(track => {
-                    store.put(track);
-                });
+                tracks.forEach(track => store.put(track));
             };
 
             tx.oncomplete = () => resolve();
@@ -60,8 +60,8 @@ export const loadTracksFromDB = async (): Promise<Track[]> => {
     try {
         const db = await openDB();
         return new Promise((resolve, reject) => {
-            const tx = db.transaction(STORE_NAME, 'readonly');
-            const store = tx.objectStore(STORE_NAME);
+            const tx = db.transaction(TRACKS_STORE, 'readonly');
+            const store = tx.objectStore(TRACKS_STORE);
             const request = store.getAll();
             
             request.onsuccess = () => resolve(request.result || []);
@@ -73,11 +73,60 @@ export const loadTracksFromDB = async (): Promise<Track[]> => {
     }
 };
 
+// --- REPORTS OPERATIONS ---
+
+export const saveReportToDB = async (report: Report): Promise<void> => {
+    try {
+        const db = await openDB();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(REPORTS_STORE, 'readwrite');
+            const store = tx.objectStore(REPORTS_STORE);
+            const request = store.put(report);
+            
+            request.onsuccess = () => resolve();
+            request.onerror = () => reject(request.error);
+        });
+    } catch (error) {
+        console.error("Error guardando reporte:", error);
+    }
+};
+
+export const loadReportsFromDB = async (): Promise<Report[]> => {
+    try {
+        const db = await openDB();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(REPORTS_STORE, 'readonly');
+            const store = tx.objectStore(REPORTS_STORE);
+            const request = store.getAll();
+            
+            request.onsuccess = () => {
+                // Sort by date desc
+                const results = request.result || [];
+                results.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+                resolve(results);
+            };
+            request.onerror = () => reject(request.error);
+        });
+    } catch (error) {
+        return [];
+    }
+};
+
+export const deleteReportFromDB = async (id: string): Promise<void> => {
+     const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(REPORTS_STORE, 'readwrite');
+        const store = tx.objectStore(REPORTS_STORE);
+        store.delete(id);
+        tx.oncomplete = () => resolve();
+    });
+};
+
 export const clearTracksDB = async (): Promise<void> => {
     const db = await openDB();
     return new Promise((resolve, reject) => {
-        const tx = db.transaction(STORE_NAME, 'readwrite');
-        const store = tx.objectStore(STORE_NAME);
+        const tx = db.transaction(TRACKS_STORE, 'readwrite');
+        const store = tx.objectStore(TRACKS_STORE);
         store.clear();
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);

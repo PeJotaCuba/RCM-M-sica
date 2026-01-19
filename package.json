@@ -13,7 +13,9 @@
     "react": "^19.2.3",
     "@google/genai": "^1.35.0",
     "xlsx": "0.18.5",
-    "docx": "8.5.0"
+    "docx": "8.5.0",
+    "jspdf": "2.5.1",
+    "pdfjs-dist": "3.11.174"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
