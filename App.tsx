@@ -133,8 +133,6 @@ const App: React.FC = () => {
         if (savedUserStr) {
             try {
                 const savedUser = JSON.parse(savedUserStr);
-                // NOTA: Se ha eliminado la lógica de autologin de 'invitado' para hacer la autenticación obligatoria.
-                
                 const validUser = currentUsersList.find(u => u.username === savedUser.username && u.password === savedUser.password);
                 if (validUser) {
                     if (!validUser.uniqueId) { validUser.uniqueId = generateUniqueId(validUser.fullName); updateUsers(currentUsersList.map(u => u.username === validUser.username ? validUser : u)); }
@@ -298,12 +296,6 @@ const App: React.FC = () => {
   };
   const handleUpdateExportItem = (id: string, field: keyof ExportItem, value: string) => { setExportItems(prev => prev.map(item => item.id === id ? { ...item, [field]: value } : item)); };
 
-  const handleShareCredits = () => {
-      let message = `*CRÉDITOS RCM*\n*Programa:* ${programName}\n\n`;
-      exportItems.forEach(item => { message += `🎵 *${item.title}*\n👤 ${item.performer}\n✍️ ${item.author}\n\n`; });
-      window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, '_blank');
-  };
-
   // --- PDF REPORT & STORAGE ---
   const handleDownloadReport = async () => {
       if (!currentUser) return;
@@ -315,17 +307,23 @@ const App: React.FC = () => {
       });
 
       // Save to IndexedDB
+      // Format Name: Produccion Musical + programa + fecha
+      const dateStr = new Date().toLocaleDateString('es-ES').replace(/\//g, '-');
+      const safeProgram = programName.replace(/[^a-zA-Z0-9 ]/g, '');
+      const fileName = `Produccion Musical ${safeProgram} ${dateStr}.pdf`;
+
       const reportId = `rep-${Date.now()}`;
       await saveReportToDB({
           id: reportId,
           date: new Date().toISOString(),
           program: programName,
           generatedBy: currentUser.username,
-          fileName: `Reporte_${programName.replace(/\s/g, '_')}_${Date.now()}.pdf`,
-          pdfBlob: pdfBlob
+          fileName: fileName,
+          pdfBlob: pdfBlob,
+          status: { downloaded: false, sent: false }
       });
 
-      alert("Reporte generado y guardado en la sección 'Reportes'.");
+      alert("Reporte generado correctamente.\nPuede encontrarlo en la sección 'Reportes' para descargarlo o enviarlo.");
       setShowExportModal(false);
   };
 
@@ -335,18 +333,11 @@ const App: React.FC = () => {
       const targetTitle = normalize(updatedTrack.metadata.title);
       const targetPerf = normalize(updatedTrack.metadata.performer);
 
-      // Ask user? Or auto? Prompt implied auto.
-      // Update logic: find matches, update fields that were edited. 
-      // Simplified: Apply auth/country/genre to matches.
-      
       updateTracks(prev => prev.map(t => {
           if (t.id === updatedTrack.id) return updatedTrack;
-
-          // Fuzzy Match
           const tTitle = normalize(t.metadata.title);
           const tPerf = normalize(t.metadata.performer);
           
-          // Match criteria: Same Title AND Same Performer (approx)
           if (tTitle === targetTitle && tPerf === targetPerf) {
              return {
                  ...t,
@@ -410,16 +401,19 @@ const App: React.FC = () => {
 
             {view === ViewState.SETTINGS && authMode === 'admin' && <Settings tracks={tracks} users={users} onAddUser={handleAddUser} onEditUser={handleEditUser} onDeleteUser={handleDeleteUser} onExportUsers={handleExportUsers} />}
             {view === ViewState.PRODUCTIONS && authMode === 'admin' && <Productions onAddTracks={(t) => updateTracks(prev => [...prev, ...t])} allTracks={tracks} />}
-            {view === ViewState.REPORTS && <ReportsViewer />}
+            {view === ViewState.REPORTS && <ReportsViewer users={users} />}
             {view === ViewState.RESULTS && selectedTrack && <CreditResults originalTrack={selectedTrack} foundCredits={foundCredits} isLoading={isSearching} onApply={handleApplyCredits} onDiscard={handleDiscardResults} />}
         </div>
 
-        {/* EXPORT MODAL */}
+        {/* EXPORT MODAL (EDIT PDF CONTENT) */}
         {showExportModal && (
             <div className="absolute inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4 animate-fade-in" onClick={() => setShowExportModal(false)}>
                 <div className="w-full max-w-lg bg-white dark:bg-zinc-900 h-[90vh] sm:h-[85vh] rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col relative overflow-hidden animate-slide-up" onClick={e => e.stopPropagation()}>
                     <div className="flex justify-between items-center p-4 border-b border-gray-100 dark:border-gray-800 shrink-0">
-                        <h3 className="text-lg font-bold text-gray-800 dark:text-white flex items-center gap-2"><span className="material-symbols-outlined text-miel">edit_document</span> Editar y Exportar</h3>
+                        <div>
+                            <h3 className="text-lg font-bold text-gray-800 dark:text-white flex items-center gap-2"><span className="material-symbols-outlined text-miel">edit_document</span> Editar Reporte</h3>
+                            <p className="text-[10px] text-gray-500">Edita los datos antes de generar el PDF.</p>
+                        </div>
                         <button onClick={() => setShowExportModal(false)} className="text-gray-400"><span className="material-symbols-outlined">close</span></button>
                     </div>
                     <div className="p-4 border-b border-gray-100 dark:border-gray-800 shrink-0 bg-gray-50 dark:bg-black/10">
@@ -450,19 +444,17 @@ const App: React.FC = () => {
                             </div>
                         ))}
                     </div>
-                    <div className="p-4 bg-white dark:bg-zinc-900 border-t border-gray-100 dark:border-gray-800 grid grid-cols-2 gap-3 shrink-0">
-                         <button onClick={handleShareCredits} className="bg-[#25D366] text-white py-3 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-1 hover:brightness-95">
-                            <span className="material-symbols-outlined text-lg">share</span> <span>Compartir</span>
-                        </button>
-                         <button onClick={handleDownloadReport} className="bg-azul-header text-white py-3 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-1 hover:brightness-95">
-                            <span className="material-symbols-outlined text-lg">picture_as_pdf</span> <span>Generar PDF</span>
+                    <div className="p-4 bg-white dark:bg-zinc-900 border-t border-gray-100 dark:border-gray-800 shrink-0">
+                         <button onClick={handleDownloadReport} className="w-full bg-azul-header text-white py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 hover:brightness-95 shadow-md">
+                            <span className="material-symbols-outlined text-lg">save_as</span> 
+                            <span>Generar y Guardar PDF</span>
                         </button>
                     </div>
                 </div>
             </div>
         )}
 
-        {/* WISHLIST (Same) */}
+        {/* TRACK DETAIL, WISHLIST, ETC... (Existing code) */}
         {showWishlist && (
             <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in" onClick={() => setShowWishlist(false)}>
                 <div className="w-full max-w-sm bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl p-6" onClick={e => e.stopPropagation()}>
@@ -473,7 +465,6 @@ const App: React.FC = () => {
             </div>
         )}
 
-        {/* TRACK DETAIL */}
         {(view === ViewState.LIST || view === ViewState.SELECTION) && selectedTrack && (
             <TrackDetail track={selectedTrack} onClose={() => setSelectedTrack(null)} onSearchCredits={() => {}} authMode={authMode} onSaveEdit={handleManualEdit} />
         )}

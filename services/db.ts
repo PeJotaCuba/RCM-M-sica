@@ -91,6 +91,30 @@ export const saveReportToDB = async (report: Report): Promise<void> => {
     }
 };
 
+export const updateReportStatus = async (id: string, statusPartial: { downloaded?: boolean; sent?: boolean }): Promise<void> => {
+    try {
+        const db = await openDB();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(REPORTS_STORE, 'readwrite');
+            const store = tx.objectStore(REPORTS_STORE);
+            const getReq = store.get(id);
+
+            getReq.onsuccess = () => {
+                const report = getReq.result as Report;
+                if (report) {
+                    report.status = { 
+                        downloaded: statusPartial.downloaded ?? report.status?.downloaded ?? false,
+                        sent: statusPartial.sent ?? report.status?.sent ?? false
+                    };
+                    store.put(report);
+                }
+                resolve();
+            };
+            getReq.onerror = () => reject();
+        });
+    } catch (e) { console.error(e); }
+};
+
 export const loadReportsFromDB = async (): Promise<Report[]> => {
     try {
         const db = await openDB();

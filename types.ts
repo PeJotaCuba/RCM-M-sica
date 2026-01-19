@@ -28,6 +28,11 @@ export interface User {
   uniqueId?: string; // Código único de firma digital
 }
 
+export interface ReportStatus {
+    downloaded: boolean;
+    sent: boolean;
+}
+
 export interface Report {
     id: string;
     date: string;
@@ -35,6 +40,7 @@ export interface Report {
     generatedBy: string;
     fileName: string;
     pdfBlob: Blob; // Almacenado en IndexedDB
+    status?: ReportStatus;
 }
 
 export enum ViewState {

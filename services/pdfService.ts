@@ -36,18 +36,21 @@ export const generateReportPDF = (data: ReportData): Blob => {
     // Header
     doc.setFontSize(16);
     doc.setFont("helvetica", "bold");
-    doc.text("REPORTE OFICIAL DE CRÉDITOS RCM", 105, 20, { align: "center" });
+    doc.text("REPORTE OFICIAL DE CRÉDITOS MUSICALES", 105, 20, { align: "center" });
+    doc.setFontSize(14);
+    doc.text("CMNL RADIO CIUDAD MONUMENTO", 105, 28, { align: "center" });
 
     doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
-    doc.text(`Usuario: ${data.userFullName}`, 20, 35);
-    doc.text(`Fecha: ${today}`, 20, 40);
-    doc.text(`Programa: ${data.program || 'Sin Especificar'}`, 20, 45);
+    // Cambiado de "Usuario" a "Director(a)"
+    doc.text(`Director(a): ${data.userFullName}`, 20, 45);
+    doc.text(`Fecha: ${today}`, 20, 50);
+    doc.text(`Programa: ${data.program || 'Sin Especificar'}`, 20, 55);
 
     doc.setLineWidth(0.5);
-    doc.line(20, 50, 190, 50);
+    doc.line(20, 60, 190, 60);
 
-    let y = 60;
+    let y = 70;
     const pageHeight = doc.internal.pageSize.height;
 
     data.items.forEach((item, index) => {
