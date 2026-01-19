@@ -306,11 +306,14 @@ const App: React.FC = () => {
 
   const handleUploadMultipleTxt = async (files: FileList, targetRoot: string) => {
       if (authMode !== 'admin') return alert("Solo Admin.");
-      if (files.length === 0) return;
+      if (!files || files.length === 0) return;
+
+      // Convertir FileList a Array para iteración segura
+      const filesArray = Array.from(files);
 
       setUploadStatus({
           isUploading: true,
-          totalFiles: files.length,
+          totalFiles: filesArray.length,
           currentFile: 0,
           currentFileName: ''
       });
@@ -318,8 +321,8 @@ const App: React.FC = () => {
       let allNewTracks: Track[] = [];
 
       try {
-          for (let i = 0; i < files.length; i++) {
-              const file = files[i];
+          for (let i = 0; i < filesArray.length; i++) {
+              const file = filesArray[i];
               setUploadStatus(prev => ({
                   ...prev,
                   currentFile: i + 1,
