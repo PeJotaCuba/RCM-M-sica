@@ -74,6 +74,14 @@ const App: React.FC = () => {
   const [isUpdating, setIsUpdating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
+  // Upload State
+  const [uploadStatus, setUploadStatus] = useState<{
+    isUploading: boolean;
+    currentFile: number;
+    totalFiles: number;
+    currentFileName: string;
+  }>({ isUploading: false, currentFile: 0, totalFiles: 0, currentFileName: '' });
+
   // ID Generator (> 20 chars, RCM prefix)
   const generateUniqueId = (name: string) => {
       const cleanName = name ? name.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().substring(0, 10) : 'USR';
@@ -278,20 +286,70 @@ const App: React.FC = () => {
       const a = document.createElement('a'); a.href = dataStr; a.download = "musuarios.json"; document.body.appendChild(a); a.click(); a.remove();
   };
 
-  const handleUploadTxt = (file: File, targetRoot: string) => {
+  // Helper para leer archivos asíncronamente
+  const readFileAsText = (file: File): Promise<string> => {
+      return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+              const text = e.target?.result;
+              if (typeof text === 'string') resolve(text);
+              else reject(new Error("Falló la lectura del archivo"));
+          };
+          reader.onerror = (e) => reject(e);
+          reader.readAsText(file);
+      });
+  };
+
+  const handleUploadMultipleTxt = async (files: FileList, targetRoot: string) => {
       if (authMode !== 'admin') return alert("Solo Admin.");
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-          const text = e.target?.result;
-          if (typeof text === 'string') {
-              const newTracks = parseTxtDatabase(text, targetRoot);
-              if (newTracks.length > 0) {
-                  await updateTracks(prev => [...prev, ...newTracks]);
-                  alert(`${newTracks.length} temas añadidos.`);
+      if (files.length === 0) return;
+
+      setUploadStatus({
+          isUploading: true,
+          totalFiles: files.length,
+          currentFile: 0,
+          currentFileName: ''
+      });
+
+      let allNewTracks: Track[] = [];
+
+      try {
+          for (let i = 0; i < files.length; i++) {
+              const file = files[i];
+              setUploadStatus(prev => ({
+                  ...prev,
+                  currentFile: i + 1,
+                  currentFileName: file.name
+              }));
+
+              // Pequeño delay para permitir que la UI se renderice
+              await new Promise(r => setTimeout(r, 50));
+
+              try {
+                  const text = await readFileAsText(file);
+                  const tracks = parseTxtDatabase(text, targetRoot);
+                  if (tracks.length > 0) {
+                      allNewTracks = [...allNewTracks, ...tracks];
+                  }
+              } catch (err) {
+                  console.error(`Error leyendo ${file.name}`, err);
               }
           }
-      };
-      reader.readAsText(file);
+
+          if (allNewTracks.length > 0) {
+              setUploadStatus(prev => ({ ...prev, currentFileName: 'Guardando en base de datos...' }));
+              await updateTracks(prev => [...prev, ...allNewTracks]);
+              alert(`Proceso finalizado.\n${allNewTracks.length} temas importados correctamente.`);
+          } else {
+              alert("No se encontraron pistas válidas en los archivos seleccionados.");
+          }
+
+      } catch (e) {
+          console.error(e);
+          alert("Ocurrió un error durante la carga.");
+      } finally {
+          setUploadStatus(prev => ({ ...prev, isUploading: false }));
+      }
   };
 
   // --- BULK SEARCH ---
@@ -524,17 +582,36 @@ const App: React.FC = () => {
             </header>
         )}
 
-        {isUpdating && (
-            <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm text-white">
+        {/* LOADING / UPLOAD MODAL */}
+        {(isUpdating || uploadStatus.isUploading) && (
+            <div className="absolute inset-0 z-[60] flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm text-white p-6">
                 <div className="size-16 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4"></div>
-                <p className="font-bold text-lg animate-pulse">Sincronizando...</p>
+                
+                {isUpdating ? (
+                    <p className="font-bold text-lg animate-pulse">Sincronizando...</p>
+                ) : (
+                    <div className="text-center w-full max-w-xs">
+                        <p className="font-bold text-lg mb-2">Procesando Archivos...</p>
+                        <p className="text-sm text-gray-300 mb-4 truncate">{uploadStatus.currentFileName}</p>
+                        
+                        <div className="w-full bg-gray-700 rounded-full h-2.5 mb-2 overflow-hidden">
+                            <div 
+                                className="bg-primary h-2.5 rounded-full transition-all duration-300" 
+                                style={{ width: `${(uploadStatus.currentFile / uploadStatus.totalFiles) * 100}%` }}
+                            ></div>
+                        </div>
+                        <p className="text-xs text-gray-400 font-mono">
+                            {uploadStatus.currentFile} / {uploadStatus.totalFiles}
+                        </p>
+                    </div>
+                )}
             </div>
         )}
 
         <div className="flex-1 overflow-hidden relative">
             {view === ViewState.LIST && (
                 <TrackList 
-                    tracks={tracks} onSelectTrack={handleSelectTrack} onUploadTxt={handleUploadTxt} isAdmin={authMode === 'admin'}
+                    tracks={tracks} onSelectTrack={handleSelectTrack} onUploadTxt={handleUploadMultipleTxt} isAdmin={authMode === 'admin'}
                     onSyncRoot={handleSyncMusicRoot} onExportRoot={handleExportMusicRoot} onClearRoot={handleClearMusicRoot}
                     selectedTrackIds={new Set(selectedTracksList.map(t => t.id))} onToggleSelection={handleToggleSelection}
                 />
@@ -543,7 +620,7 @@ const App: React.FC = () => {
             {view === ViewState.SELECTION && (
                 <div className="h-full bg-background-light dark:bg-background-dark overflow-y-auto flex flex-col">
                     <TrackList 
-                        tracks={selectedTracksList} onSelectTrack={handleSelectTrack} onUploadTxt={() => {}} onBulkSelectTxt={handleBulkSelectTxt}
+                        tracks={selectedTracksList} onSelectTrack={handleSelectTrack} onUploadTxt={handleUploadMultipleTxt} onBulkSelectTxt={handleBulkSelectTxt}
                         isAdmin={false} onSyncRoot={() => {}} onExportRoot={() => {}} onClearRoot={() => {}} 
                         selectedTrackIds={new Set(selectedTracksList.map(t => t.id))} onToggleSelection={handleToggleSelection}
                         onOpenExportPreview={handleOpenExportModal} isSelectionView={true} onClearSelection={handleClearSelection}

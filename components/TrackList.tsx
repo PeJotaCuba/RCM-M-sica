@@ -5,7 +5,7 @@ import { Track } from '../types';
 interface TrackListProps {
   tracks: Track[];
   onSelectTrack: (track: Track) => void;
-  onUploadTxt: (file: File, root: string) => void;
+  onUploadTxt: (files: FileList, root: string) => void;
   isAdmin: boolean;
   onSyncRoot: (root: string) => void;
   onExportRoot: (root: string) => void;
@@ -135,8 +135,10 @@ const TrackList: React.FC<TrackListProps> = ({
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-      if (e.target.files && e.target.files[0]) {
-          onUploadTxt(e.target.files[0], activeRoot);
+      if (e.target.files && e.target.files.length > 0) {
+          onUploadTxt(e.target.files, activeRoot);
+          // Reset input value to allow re-uploading the same file if needed
+          e.target.value = '';
       }
   };
 
@@ -537,8 +539,8 @@ const TrackList: React.FC<TrackListProps> = ({
             <div className="p-4 bg-gray-50 dark:bg-white/5 border-b border-dashed border-gray-300 dark:border-gray-700">
                 <label className="flex items-center justify-center gap-3 p-3 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg cursor-pointer hover:border-primary hover:bg-white dark:hover:bg-white/10 transition-all group">
                     <span className="material-symbols-outlined text-gray-400 group-hover:text-primary">upload_file</span>
-                    <span className="text-xs font-bold text-gray-500 group-hover:text-primary">Cargar TXT en {activeRoot}</span>
-                    <input type="file" accept=".txt" onChange={handleFileChange} className="hidden" />
+                    <span className="text-xs font-bold text-gray-500 group-hover:text-primary">Cargar TXTs en {activeRoot} (Múltiple)</span>
+                    <input type="file" accept=".txt" multiple onChange={handleFileChange} className="hidden" />
                 </label>
             </div>
         )}
