@@ -2,67 +2,89 @@
 import { Track } from "./types";
 
 /**
- * Parsea el contenido de los TXT.
- * Limpieza inteligente de rutas:
- * 1. Normaliza barras a /.
- * 2. Respeta la ruta del TXT para garantizar reproducción.
- * 3. Si no hay ruta, usa el contexto (Música X).
+ * Parsea el contenido de los TXT con lógica robusta para rutas.
+ * 
+ * MEJORAS CRÍTICAS:
+ * 1. Forzado de Raíz: Si cargamos en "Música 3", y el TXT dice "Ruta: D:\Salsa", 
+ *    la ruta final será "Música 3/Salsa". Esto asegura que el archivo SEA VISIBLE.
+ * 2. Limpieza de basura: Elimina letras de unidad (C:, D:) y caracteres extraños.
+ * 3. Detección flexible: Reconoce "Titulo:", "Título:", "TITULO", etc.
  */
 export const parseTxtDatabase = (text: string, rootContext: string = 'Importado'): Track[] => {
   const tracks: Track[] = [];
-  const normalizedText = text.replace(/\r\n/g, '\n');
-  const lines = normalizedText.split('\n');
   
+  // Normalizar saltos de línea y limpiar caracteres invisibles al inicio (BOM)
+  const cleanText = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const lines = cleanText.split('\n');
+  
+  // Variables temporales para el track actual
   let currentTitle = "";
   let currentAuthor = "";
   let currentPerformer = "";
-  let currentAlbum = ""; // Carpeta
-  let currentOriginalPath = ""; // Ruta
+  let currentGenre = "";
+  let currentAlbum = "";       // Mapea a 'Carpeta'
+  let currentOriginalPath = ""; // Mapea a 'Ruta'
   
+  // Función auxiliar para normalizar cadenas (quitar acentos y lowercase) para comparaciones
+  const normalizeKey = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+
   const saveTrack = () => {
       if (currentTitle) {
           const cleanTitle = currentTitle.trim();
           
-          // --- LOGICA DE LIMPIEZA DE RUTA ---
-          // Prioridad: Ruta explícita -> Carpeta/Album -> Contexto
+          // --- LÓGICA CRÍTICA DE RUTA ---
+          // 1. Determinar qué ruta usar (Ruta tiene prioridad sobre Carpeta/Album)
           let rawPath = currentOriginalPath || currentAlbum;
           
           let finalPath = "";
 
           if (rawPath) {
-              // 1. Normalizar barras
-              let cleanSegment = rawPath.replace(/\\/g, '/'); 
+              // Limpiar barras invertidas de Windows
+              let cleanSegment = rawPath.replace(/\\/g, '/');
               
-              // 2. Eliminar letras de unidad (C:, D:)
+              // Eliminar letra de unidad (ej: "D:", "C:")
               cleanSegment = cleanSegment.replace(/^[a-zA-Z]:/, '');
               
-              // 3. Eliminar IPs o rutas de red al inicio si es necesario, pero manteniendo estructura de carpetas
-              // (Opcional: Si el usuario usa rutas relativas locales, esto ayuda a limpiar basura de red)
-              cleanSegment = cleanSegment.replace(/^\/+\d+\.\d+\.\d+\.\d+(\/[^\/]+)?/, '');
-              
-              // 4. Limpieza de filename al final de la ruta si existe
-              const parts = cleanSegment.split('/').filter(p => p.trim() !== '');
+              // Eliminar slashes iniciales múltiples
+              cleanSegment = cleanSegment.replace(/^[\/\s]+/, '');
+
+              // Eliminar el nombre del archivo si está incluido al final de la ruta
+              // (Detecta si el final de la ruta se parece al título + .mp3)
+              const parts = cleanSegment.split('/');
               if (parts.length > 0) {
                   const lastPart = parts[parts.length - 1];
-                  if (lastPart.toLowerCase().endsWith('.mp3') || lastPart.toLowerCase() === cleanTitle.toLowerCase() + '.mp3') {
-                      parts.pop();
+                  if (lastPart.toLowerCase().endsWith('.mp3') || lastPart.toLowerCase().includes(cleanTitle.toLowerCase())) {
+                      parts.pop(); // Quitamos el nombre del archivo para dejar solo la carpeta
                   }
               }
-
-              // Reconstruir
               cleanSegment = parts.join('/');
-              
-              // Asegurar que no empiece con / para ser relativa limpia
-              finalPath = cleanSegment.replace(/^\//, '');
+
+              // --- FORZADO DE CONTEXTO (Música 1, Música 3, etc.) ---
+              // Verificamos si la ruta extraída YA empieza con el rootContext (ej. "Música 3")
+              const normalizedContext = normalizeKey(rootContext);
+              const normalizedSegment = normalizeKey(cleanSegment);
+
+              if (normalizedSegment.startsWith(normalizedContext)) {
+                  // Si ya tiene "Música 3/Salsa", lo dejamos tal cual (respetando mayúsculas originales si es posible)
+                  finalPath = cleanSegment;
+              } else {
+                  // Si no tiene el contexto, LO PREFIJAMOS.
+                  // Ej: "Salsa/Casino" -> "Música 3/Salsa/Casino"
+                  // Esto garantiza que aparezca en la pestaña correcta.
+                  finalPath = `${rootContext}/${cleanSegment}`;
+              }
           } else {
-              // Fallback si no hay ruta en el TXT: Usar contexto
+              // Si no hay ruta ni carpeta, lo metemos en una genérica dentro del contexto
               finalPath = `${rootContext}/Desconocido`;
           }
+
+          // Limpieza final de ruta: quitar slashes dobles y espacios en los bordes de los segmentos
+          finalPath = finalPath.split('/').map(p => p.trim()).filter(p => p).join('/');
 
           tracks.push({
               id: `track-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
               filename: `${cleanTitle}.mp3`,
-              path: finalPath, // Ruta exacta normalizada
+              path: finalPath,
               size: '---',
               isVerified: true,
               metadata: {
@@ -71,16 +93,17 @@ export const parseTxtDatabase = (text: string, rootContext: string = 'Importado'
                   authorCountry: "", 
                   performer: currentPerformer || "Desconocido",
                   performerCountry: "",
-                  album: currentAlbum || (finalPath.split('/').pop() || "Desconocido"), 
+                  album: currentAlbum || (finalPath.split('/').pop() || "Carpeta General"), 
                   year: "", 
-                  genre: ""
+                  genre: currentGenre || ""
               }
           });
       }
-      // Reset variables
+      // Reset variables para el siguiente track
       currentTitle = "";
       currentAuthor = "";
       currentPerformer = "";
+      currentGenre = "";
       currentAlbum = "";
       currentOriginalPath = "";
   };
@@ -89,31 +112,38 @@ export const parseTxtDatabase = (text: string, rootContext: string = 'Importado'
       const line = lines[i].trim();
       if (!line) continue;
       
-      const lowerLine = line.toLowerCase();
+      const lowerLine = normalizeKey(line);
 
+      // Detectar inicio de nuevo registro
       if (lowerLine.startsWith('archivo #') || lowerLine.startsWith('archivo n')) {
-          if (currentTitle) saveTrack();
+          // Si ya teníamos datos capturados, guardamos el anterior antes de empezar el nuevo
+          saveTrack(); 
           continue;
       }
 
-      if (lowerLine.startsWith('titulo:') || lowerLine.startsWith('título:')) {
+      // Extracción de campos (Flexible con los dos puntos y espacios)
+      if (lowerLine.startsWith('titulo')) {
           currentTitle = line.substring(line.indexOf(':') + 1).trim();
       } 
-      else if (lowerLine.startsWith('compositor:') || lowerLine.startsWith('autor:')) {
+      else if (lowerLine.startsWith('compositor') || lowerLine.startsWith('autor')) {
           currentAuthor = line.substring(line.indexOf(':') + 1).trim();
       }
-      else if (lowerLine.startsWith('interprete:') || lowerLine.startsWith('intérprete:')) {
+      else if (lowerLine.startsWith('interprete')) {
           currentPerformer = line.substring(line.indexOf(':') + 1).trim();
       }
-      else if (lowerLine.startsWith('carpeta:') || lowerLine.startsWith('album:')) {
+      else if (lowerLine.startsWith('genero')) {
+          currentGenre = line.substring(line.indexOf(':') + 1).trim();
+      }
+      else if (lowerLine.startsWith('carpeta') || lowerLine.startsWith('album')) {
           currentAlbum = line.substring(line.indexOf(':') + 1).trim();
       }
-      else if (lowerLine.startsWith('ruta:')) {
+      else if (lowerLine.startsWith('ruta')) {
           currentOriginalPath = line.substring(line.indexOf(':') + 1).trim();
       }
   }
 
-  if (currentTitle) saveTrack(); 
+  // Guardar el último track procesado al terminar el archivo
+  saveTrack(); 
 
   return tracks;
 };

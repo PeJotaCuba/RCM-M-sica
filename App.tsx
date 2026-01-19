@@ -111,12 +111,16 @@ const App: React.FC = () => {
   // Helper to save tracks
   const updateTracks = async (newTracksInput: Track[] | ((prev: Track[]) => Track[])) => {
       let finalTracks: Track[];
+      // Determine new state
       if (typeof newTracksInput === 'function') {
           finalTracks = newTracksInput(tracks);
       } else {
           finalTracks = newTracksInput;
       }
+      
+      // Update State immediately
       setTracks(finalTracks);
+      
       setIsSaving(true);
       try {
           await saveTracksToDB(finalTracks);
@@ -327,6 +331,7 @@ const App: React.FC = () => {
 
               try {
                   const text = await readFileAsText(file);
+                  // Pasamos targetRoot (ej: "Música 3") al parser para que fuerce la ruta
                   const tracks = parseTxtDatabase(text, targetRoot);
                   if (tracks.length > 0) {
                       allNewTracks = [...allNewTracks, ...tracks];
@@ -338,8 +343,11 @@ const App: React.FC = () => {
 
           if (allNewTracks.length > 0) {
               setUploadStatus(prev => ({ ...prev, currentFileName: 'Guardando en base de datos...' }));
+              
+              // Actualizamos el estado. Al usar un nuevo array, React re-renderiza TrackList
               await updateTracks(prev => [...prev, ...allNewTracks]);
-              alert(`Proceso finalizado.\n${allNewTracks.length} temas importados correctamente.`);
+              
+              alert(`Proceso finalizado.\n${allNewTracks.length} temas importados correctamente en "${targetRoot}".`);
           } else {
               alert("No se encontraron pistas válidas en los archivos seleccionados.");
           }
