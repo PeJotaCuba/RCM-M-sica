@@ -22,7 +22,7 @@ export interface CreditInfo {
 export interface User {
   username: string;
   password: string;
-  role: 'admin' | 'guest'; // 'guest' en código, 'Usuario' en UI
+  role: 'admin' | 'director' | 'user'; 
   fullName: string;
   phone: string;
   uniqueId?: string; // Código único de firma digital
@@ -40,6 +40,7 @@ export interface Report {
     generatedBy: string;
     fileName: string;
     pdfBlob: Blob; // Almacenado en IndexedDB
+    items?: any[]; // Guardamos los items para poder re-editar el reporte
     status?: ReportStatus;
 }
 
@@ -60,7 +61,7 @@ export interface SearchFilters {
   type: FilterType;
 }
 
-export type AuthMode = 'guest' | 'admin' | null;
+export type AuthMode = 'user' | 'director' | 'admin' | null;
 
 export const PROGRAMS_LIST = [
   "Buenos Días, Bayamo",

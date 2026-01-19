@@ -10,9 +10,10 @@ interface SettingsProps {
   onEditUser: (u: User) => void;
   onDeleteUser: (username: string) => void;
   onExportUsers: () => void;
+  onImportUsers: (users: User[]) => void;
 }
 
-const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUser, onDeleteUser, onExportUsers }) => {
+const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUser, onDeleteUser, onExportUsers, onImportUsers }) => {
   // Form State
   const [formData, setFormData] = useState({
       username: '',
@@ -21,7 +22,7 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
       password: '',
       confirmPassword: '',
       uniqueId: '',
-      role: 'guest' as 'guest' | 'admin'
+      role: 'user' as 'user' | 'director' | 'admin'
   });
   const [showPassword, setShowPassword] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -37,22 +38,13 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
       return `RCM-${cleanName}-${random}`;
   };
 
-  // Helper to generate Auto Password
-  // Format: RadioCiudad + UserIndex + YearLast2Digits
-  const generateAutoPassword = () => {
-      const yearSuffix = new Date().getFullYear().toString().slice(-2);
-      // We use users.length + 1 for the ID logic, ensuring it grows.
-      const userId = users.length + 1;
-      return `RadioCiudad${userId}${yearSuffix}`;
-  };
-
   const downloadCreditStats = () => {
       const dataTracks = tracks; 
       if (dataTracks.length === 0) {
           alert("No hay pistas en la base de datos.");
           return;
       }
-      // ... (Resto del código de estadísticas igual que antes) ...
+      
       const totalTracks = dataTracks.length;
       const countUnique = (field: keyof typeof dataTracks[0]['metadata']) => {
           const s = new Set<string>();
@@ -109,7 +101,7 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
 
   const handleResetForm = () => {
       setFormData({
-          username: '', fullName: '', phone: '', password: '', confirmPassword: '', uniqueId: '', role: 'guest'
+          username: '', fullName: '', phone: '', password: '', confirmPassword: '', uniqueId: '', role: 'user'
       });
       setIsEditing(false);
   };
@@ -128,21 +120,13 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
   };
 
   const handleSubmitUser = () => {
-      // Auto-generate password if empty and creating new
-      let finalPassword = formData.password;
-      if (!isEditing && !finalPassword) {
-          finalPassword = generateAutoPassword();
-          // Also set confirm so validation passes if we were to check, but we skip validation for auto
-      } else {
-          // Validation only if manual entry
-           if (!formData.username || !finalPassword || !formData.fullName) {
-              alert("Todos los campos marcados son obligatorios.");
-              return;
-          }
-          if (finalPassword !== formData.confirmPassword) {
-              alert("Las contraseñas no coinciden.");
-              return;
-          }
+      if (!formData.username || !formData.password || !formData.fullName) {
+          alert("Todos los campos marcados son obligatorios.");
+          return;
+      }
+      if (formData.password !== formData.confirmPassword) {
+          alert("Las contraseñas no coinciden.");
+          return;
       }
 
       if (!isEditing && users.some(u => u.username === formData.username)) {
@@ -150,11 +134,12 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
           return;
       }
 
+      // Admin logic: If editing, uniqueId persists unless explicitly changed. If new, generate.
       const finalUniqueId = formData.uniqueId.trim() || generateUniqueId(formData.fullName);
 
       const userObj: User = {
           username: formData.username,
-          password: finalPassword,
+          password: formData.password,
           role: formData.role,
           fullName: formData.fullName,
           phone: formData.phone,
@@ -166,9 +151,85 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
           alert("Usuario actualizado correctamente.");
       } else {
           onAddUser(userObj);
-          alert(`Usuario creado correctamente.\nContraseña Generada: ${finalPassword}`);
+          alert(`Usuario creado correctamente.`);
       }
       handleResetForm();
+  };
+
+  // --- TXT Import Logic ---
+  const handleTxtUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (!e.target.files || e.target.files.length === 0) return;
+      const file = e.target.files[0];
+      const reader = new FileReader();
+      
+      reader.onload = (event) => {
+          const text = event.target?.result as string;
+          if (!text) return;
+          
+          const lines = text.split('\n');
+          const newUsers: User[] = [];
+          let current: Partial<User> = { role: 'user' }; // Default role: User
+          
+          const saveCurrent = () => {
+             if (current.username && current.password && current.fullName) {
+                 // Check if phone exists or empty string
+                 if(!current.phone) current.phone = '';
+                 // Generate ID
+                 if(!current.uniqueId) current.uniqueId = generateUniqueId(current.fullName);
+                 
+                 newUsers.push(current as User);
+             }
+          };
+
+          lines.forEach(line => {
+             const l = line.trim();
+             if (l.toLowerCase().startsWith('nombre:')) {
+                 saveCurrent();
+                 current = { role: 'user', fullName: l.substring(7).trim() };
+             } else if (l.toLowerCase().startsWith('móvil:') || l.toLowerCase().startsWith('movil:')) {
+                 current.phone = l.substring(6).trim();
+             } else if (l.toLowerCase().startsWith('usuario:')) {
+                 current.username = l.substring(8).trim();
+             } else if (l.toLowerCase().startsWith('contraseña:') || l.toLowerCase().startsWith('contrasena:')) {
+                 current.password = l.substring(11).trim();
+             }
+          });
+          saveCurrent(); // Save last one
+
+          if (newUsers.length > 0) {
+              onImportUsers(newUsers);
+          } else {
+              alert("No se encontraron usuarios válidos en el archivo. Verifique el formato:\nNombre: ...\nMóvil: ...\nUsuario: ...\nContraseña: ...");
+          }
+          e.target.value = ''; // Reset input
+      };
+      reader.readAsText(file);
+  };
+
+  const handleShareWhatsApp = (u: User) => {
+      if (!u.phone) {
+          alert("Este usuario no tiene número de móvil registrado.");
+          return;
+      }
+
+      const message = `Saludos. Tus credenciales APP-RCM son
+Usuario: ${u.username}
+Contraseña: ${u.password}
+
+Disfruta de nuestras app s en los siguientes enlaces:
+
+Agenda https://rcmagenda.vercel.app/#/home
+
+Música https://rcm-musica.vercel.app/`;
+
+      const url = `https://wa.me/${u.phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(message)}`;
+      window.open(url, '_blank');
+  };
+
+  const getRoleLabel = (role: string) => {
+      if (role === 'admin') return 'Coordinador';
+      if (role === 'director') return 'Director';
+      return 'Usuario';
   };
 
   return (
@@ -196,13 +257,20 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
                         <span className="material-symbols-outlined">manage_accounts</span>
                         <h3 className="font-bold">Gestión de Usuarios</h3>
                     </div>
-                    <button 
-                        onClick={onExportUsers}
-                        className="bg-azul-header text-white text-[10px] font-bold uppercase px-3 py-1.5 rounded flex items-center gap-1 hover:bg-blue-900"
-                    >
-                        <span className="material-symbols-outlined text-xs">save</span>
-                        Guardar DB
-                    </button>
+                    <div className="flex gap-2">
+                         <label className="bg-gray-100 text-gray-600 text-[10px] font-bold uppercase px-3 py-1.5 rounded flex items-center gap-1 hover:bg-gray-200 cursor-pointer">
+                            <span className="material-symbols-outlined text-xs">upload_file</span>
+                            Cargar TXT
+                            <input type="file" accept=".txt" onChange={handleTxtUpload} className="hidden" />
+                        </label>
+                        <button 
+                            onClick={onExportUsers}
+                            className="bg-azul-header text-white text-[10px] font-bold uppercase px-3 py-1.5 rounded flex items-center gap-1 hover:bg-blue-900"
+                        >
+                            <span className="material-symbols-outlined text-xs">save</span>
+                            Guardar DB
+                        </button>
+                    </div>
                 </div>
                 
                 <div className="grid gap-3 mb-6 bg-gray-50 dark:bg-black/20 p-4 rounded-lg">
@@ -218,19 +286,28 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
 
                     <div className="grid grid-cols-2 gap-3">
                         <input placeholder="Nombre de Usuario (Login) *" value={formData.username} disabled={isEditing} onChange={e => setFormData({...formData, username: e.target.value})} className={`p-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 text-sm ${isEditing ? 'opacity-50' : ''}`} />
-                        <input placeholder="Firma Digital (Auto si vacío)" value={formData.uniqueId} onChange={e => setFormData({...formData, uniqueId: e.target.value})} className="p-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 text-sm font-mono" />
+                        <input placeholder="Firma Digital (Solo Lectura/Admin)" value={formData.uniqueId} onChange={e => setFormData({...formData, uniqueId: e.target.value})} className="p-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 text-sm font-mono" />
                     </div>
 
-                    {!isEditing && <p className="text-[10px] text-gray-400 mt-1">Nota: Si deja la contraseña vacía, se generará automáticamente (RadioCiudad + # + Año).</p>}
                     <div className="grid grid-cols-2 gap-3 relative">
                         <input type={showPassword ? "text" : "password"} placeholder="Contraseña *" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} className="w-full p-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 text-sm" />
                          <input type={showPassword ? "text" : "password"} placeholder="Confirmar Contraseña *" value={formData.confirmPassword} onChange={e => setFormData({...formData, confirmPassword: e.target.value})} className="w-full p-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 text-sm" />
                         <button onClick={() => setShowPassword(!showPassword)} className="absolute right-[-30px] top-2 text-gray-400"><span className="material-symbols-outlined text-sm">{showPassword ? 'visibility_off' : 'visibility'}</span></button>
                     </div>
 
-                    <div className="flex gap-4 items-center mt-1">
-                        <label className="flex items-center gap-2 cursor-pointer"><input type="radio" name="role" checked={formData.role === 'guest'} onChange={() => setFormData({...formData, role: 'guest'})} /><span className="text-sm">Usuario</span></label>
-                        <label className="flex items-center gap-2 cursor-pointer"><input type="radio" name="role" checked={formData.role === 'admin'} onChange={() => setFormData({...formData, role: 'admin'})} /><span className="text-sm">Administrador</span></label>
+                    <div className="flex gap-4 items-center mt-2 flex-wrap">
+                        <label className="flex items-center gap-2 cursor-pointer bg-white dark:bg-white/5 px-2 py-1 rounded border border-gray-100 dark:border-white/5">
+                            <input type="radio" name="role" checked={formData.role === 'admin'} onChange={() => setFormData({...formData, role: 'admin'})} />
+                            <span className="text-xs font-bold text-miel">Coordinador (Admin)</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer bg-white dark:bg-white/5 px-2 py-1 rounded border border-gray-100 dark:border-white/5">
+                            <input type="radio" name="role" checked={formData.role === 'director'} onChange={() => setFormData({...formData, role: 'director'})} />
+                            <span className="text-xs font-bold text-azul-header dark:text-blue-400">Director</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer bg-white dark:bg-white/5 px-2 py-1 rounded border border-gray-100 dark:border-white/5">
+                            <input type="radio" name="role" checked={formData.role === 'user'} onChange={() => setFormData({...formData, role: 'user'})} />
+                            <span className="text-xs font-bold text-gray-600 dark:text-gray-400">Usuario</span>
+                        </label>
                     </div>
 
                     <button onClick={handleSubmitUser} className={`text-white text-sm font-bold py-2 rounded mt-2 ${isEditing ? 'bg-miel hover:bg-yellow-600' : 'bg-azul-header hover:bg-blue-900'}`}>
@@ -245,18 +322,19 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
                             <div key={u.username} className="flex flex-col p-3 bg-gray-50 dark:bg-white/5 rounded border border-gray-100 dark:border-white/5 gap-2">
                                 <div className="flex items-center justify-between">
                                     <div className="flex items-center gap-2">
-                                        <div className={`size-2 rounded-full ${u.role === 'admin' ? 'bg-miel' : 'bg-green-500'}`}></div>
+                                        <div className={`size-2 rounded-full ${u.role === 'admin' ? 'bg-miel' : (u.role === 'director' ? 'bg-azul-header' : 'bg-green-500')}`}></div>
                                         <span className="font-bold text-sm text-gray-800 dark:text-gray-200">{u.username}</span>
-                                        <span className="text-[10px] text-gray-400 uppercase">({u.role === 'guest' ? 'Usuario' : 'Admin'})</span>
+                                        <span className="text-[10px] text-gray-400 uppercase">({getRoleLabel(u.role)})</span>
                                     </div>
                                     <div className="flex gap-2">
-                                         <button onClick={() => handleEditClick(u)} className="text-primary hover:text-primary-dark"><span className="material-symbols-outlined text-lg">edit</span></button>
+                                        <button onClick={() => handleShareWhatsApp(u)} className="text-green-500 hover:text-green-600" title="Enviar credenciales"><span className="material-symbols-outlined text-lg">chat</span></button>
+                                        <button onClick={() => handleEditClick(u)} className="text-primary hover:text-primary-dark"><span className="material-symbols-outlined text-lg">edit</span></button>
                                         <button onClick={() => onDeleteUser(u.username)} className="text-red-400 hover:text-red-600"><span className="material-symbols-outlined text-lg">delete</span></button>
                                     </div>
                                 </div>
                                 <div className="text-xs text-gray-500 flex flex-wrap gap-4">
                                     <span><span className="font-bold">Nombre:</span> {u.fullName || '---'}</span>
-                                    <span><span className="font-bold">ID:</span> {u.uniqueId || '---'}</span>
+                                    <span><span className="font-bold">Móvil:</span> {u.phone || '---'}</span>
                                     <span><span className="font-bold">Clave:</span> {u.password}</span>
                                 </div>
                             </div>

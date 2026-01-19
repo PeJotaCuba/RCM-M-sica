@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Track, ViewState, CreditInfo, AuthMode, User, PROGRAMS_LIST } from './types';
+import { Track, ViewState, CreditInfo, AuthMode, User, PROGRAMS_LIST, Report } from './types';
 import { parseTxtDatabase } from './constants';
 import TrackList from './components/TrackList';
 import TrackDetail from './components/TrackDetail';
@@ -68,6 +68,7 @@ const App: React.FC = () => {
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportItems, setExportItems] = useState<ExportItem[]>([]);
   const [programName, setProgramName] = useState(PROGRAMS_LIST[0]);
+  const [editingReportId, setEditingReportId] = useState<string | null>(null); // To track if we are updating an existing report
 
   const [foundCredits, setFoundCredits] = useState<CreditInfo | null>(null);
   const [isSearching, setIsSearching] = useState(false);
@@ -159,6 +160,27 @@ const App: React.FC = () => {
   const handleAddUser = (u: User) => updateUsers([...users, u]);
   const handleEditUser = (updatedUser: User) => updateUsers(users.map(u => u.username === updatedUser.username ? updatedUser : u));
   const handleDeleteUser = (username: string) => { if (users.length <= 1) return alert("Error"); updateUsers(users.filter(u => u.username !== username)); };
+  
+  // New Bulk Import Function
+  const handleImportUsers = (newUsers: User[]) => {
+      // Filter duplicates
+      const existingUsernames = new Set(users.map(u => u.username.toLowerCase()));
+      const validNewUsers = newUsers.filter(u => !existingUsernames.has(u.username.toLowerCase()));
+      
+      if (validNewUsers.length === 0) {
+          alert("No se añadieron usuarios (posibles duplicados o archivo vacío).");
+          return;
+      }
+      
+      // Ensure unique IDs
+      const processedUsers = validNewUsers.map(u => ({
+          ...u,
+          uniqueId: u.uniqueId || generateUniqueId(u.fullName)
+      }));
+
+      updateUsers([...users, ...processedUsers]);
+      alert(`${processedUsers.length} usuarios importados correctamente.`);
+  };
 
   const handleSyncUsers = async () => { /* ... same ... */ setIsUpdating(true); try { const r = await fetch(USERS_DB_URL); const j = await r.json(); updateUsers(j); alert("Ok"); if(view===ViewState.LOGIN) window.location.reload(); } catch(e){ alert("Err"); } finally { setIsUpdating(false); } };
   const handleSyncMusicRoot = async (rootName: string) => { /* ... same ... */ const url = DB_URLS[rootName]; if(!url) return; if(!confirm("Sync?")) return; setIsUpdating(true); try { const r = await fetch(url); const n = await r.json(); const k = tracks.filter(t => !t.path.startsWith(rootName)); await updateTracks([...k, ...n]); alert("Ok"); } catch(e){ alert("Err"); } finally { setIsUpdating(false); } };
@@ -289,12 +311,37 @@ const App: React.FC = () => {
   const handleClearSelection = () => { if (window.confirm('¿Limpiar?')) { setSelectedTracksList([]); setMissingQueries([]); } };
 
   const handleOpenExportModal = () => {
+      setEditingReportId(null);
       const items: ExportItem[] = [];
       selectedTracksList.forEach(t => { items.push({ id: t.id, title: t.metadata.title || t.filename, author: t.metadata.author || '', authorCountry: t.metadata.authorCountry || '', performer: t.metadata.performer || '', performerCountry: t.metadata.performerCountry || '', genre: t.metadata.genre || '', source: 'db', path: t.path }); });
       missingQueries.forEach((q, idx) => { items.push({ id: `missing-${idx}`, title: q, author: '', authorCountry: '', performer: '', performerCountry: '', genre: '', source: 'manual' }); });
       setExportItems(items); setShowExportModal(true);
   };
   const handleUpdateExportItem = (id: string, field: keyof ExportItem, value: string) => { setExportItems(prev => prev.map(item => item.id === id ? { ...item, [field]: value } : item)); };
+
+  const handleShareCredits = () => {
+      let message = `*CRÉDITOS RCM*\n*Programa:* ${programName}\n\n`;
+      exportItems.forEach(item => { message += `🎵 *${item.title}*\n👤 ${item.performer}\n✍️ ${item.author}\n\n`; });
+      window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, '_blank');
+  };
+
+  const handleDownloadTxt = () => {
+      let content = `PROGRAMA: ${programName}\n\n`;
+      exportItems.forEach(item => {
+          content += `TITULO: ${item.title}\n`;
+          content += `INTERPRETE: ${item.performer} (${item.performerCountry})\n`;
+          content += `AUTOR: ${item.author} (${item.authorCountry})\n`;
+          content += `GENERO: ${item.genre}\n`;
+          content += `-----------------------------------\n`;
+      });
+      const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Seleccion_${programName.replace(/\s+/g, '_')}.txt`;
+      a.click();
+      URL.revokeObjectURL(url);
+  };
 
   // --- PDF REPORT & STORAGE ---
   const handleDownloadReport = async () => {
@@ -312,7 +359,8 @@ const App: React.FC = () => {
       const safeProgram = programName.replace(/[^a-zA-Z0-9 ]/g, '');
       const fileName = `Produccion Musical ${safeProgram} ${dateStr}.pdf`;
 
-      const reportId = `rep-${Date.now()}`;
+      const reportId = editingReportId || `rep-${Date.now()}`;
+      
       await saveReportToDB({
           id: reportId,
           date: new Date().toISOString(),
@@ -320,11 +368,24 @@ const App: React.FC = () => {
           generatedBy: currentUser.username,
           fileName: fileName,
           pdfBlob: pdfBlob,
+          items: exportItems, // Guardar items para re-editar
           status: { downloaded: false, sent: false }
       });
 
-      alert("Reporte generado correctamente.\nPuede encontrarlo en la sección 'Reportes' para descargarlo o enviarlo.");
+      alert("Reporte generado correctamente.\nPuede encontrarlo en la sección 'Reportes' para descargarlo.");
       setShowExportModal(false);
+      setEditingReportId(null);
+  };
+
+  const handleEditReport = (report: Report) => {
+      if (report.items) {
+          setExportItems(report.items);
+          setProgramName(report.program);
+          setEditingReportId(report.id);
+          setShowExportModal(true);
+      } else {
+          alert("Este reporte es antiguo y no contiene los datos necesarios para editarlo.");
+      }
   };
 
   // --- GLOBAL METADATA UPDATE ---
@@ -361,6 +422,12 @@ const App: React.FC = () => {
   if (view === ViewState.LOGIN) { return <LoginScreen onLoginSuccess={handleLoginSuccess} users={users} onUpdateUsers={handleSyncUsers} isUpdating={isUpdating} />; }
   const navigateTo = (v: ViewState) => { setView(v); window.history.pushState({ view: v }, ''); };
 
+  const getRoleLabel = () => {
+      if (authMode === 'admin') return 'COORDINADOR';
+      if (authMode === 'director') return 'DIRECTOR';
+      return 'REALIZADOR'; // Usuario
+  };
+
   return (
     <div className="max-w-md mx-auto h-[100dvh] bg-gray-100 shadow-2xl overflow-hidden relative border-x border-gray-200 flex flex-col">
         {view !== ViewState.RESULTS && (
@@ -370,8 +437,10 @@ const App: React.FC = () => {
                 </button>
                 <div className="flex items-center gap-2">
                     {isSaving && <span className="size-2 bg-yellow-400 rounded-full animate-pulse"></span>}
-                    {currentUser && authMode !== 'admin' && <button onClick={() => alert(`ID:\n${currentUser.uniqueId}`)} className="bg-white/10 text-white rounded-full p-1.5"><span className="material-symbols-outlined text-sm">vpn_key</span></button>}
-                    <div className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${authMode === 'admin' ? 'bg-miel' : 'bg-green-600'}`}>{authMode === 'admin' ? 'ADMIN' : (authMode === 'guest' ? 'INVITADO' : 'USUARIO')}</div>
+                    {currentUser && authMode === 'director' && <button onClick={() => alert(`ID:\n${currentUser.uniqueId}`)} className="bg-white/10 text-white rounded-full p-1.5"><span className="material-symbols-outlined text-sm">vpn_key</span></button>}
+                    <div className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${authMode === 'admin' ? 'bg-miel' : 'bg-green-600'}`}>
+                        {getRoleLabel()}
+                    </div>
                     <button onClick={handleLogout} className="text-white bg-white/10 p-2 rounded-full size-10 flex items-center justify-center"><span className="material-symbols-outlined text-xl">logout</span></button>
                 </div>
             </header>
@@ -399,20 +468,20 @@ const App: React.FC = () => {
                 </div>
             )}
 
-            {view === ViewState.SETTINGS && authMode === 'admin' && <Settings tracks={tracks} users={users} onAddUser={handleAddUser} onEditUser={handleEditUser} onDeleteUser={handleDeleteUser} onExportUsers={handleExportUsers} />}
+            {view === ViewState.SETTINGS && authMode === 'admin' && <Settings tracks={tracks} users={users} onAddUser={handleAddUser} onEditUser={handleEditUser} onDeleteUser={handleDeleteUser} onExportUsers={handleExportUsers} onImportUsers={handleImportUsers} />}
             {view === ViewState.PRODUCTIONS && authMode === 'admin' && <Productions onAddTracks={(t) => updateTracks(prev => [...prev, ...t])} allTracks={tracks} />}
-            {view === ViewState.REPORTS && <ReportsViewer users={users} />}
+            {view === ViewState.REPORTS && authMode === 'director' && <ReportsViewer users={users} onEdit={handleEditReport} />}
             {view === ViewState.RESULTS && selectedTrack && <CreditResults originalTrack={selectedTrack} foundCredits={foundCredits} isLoading={isSearching} onApply={handleApplyCredits} onDiscard={handleDiscardResults} />}
         </div>
 
-        {/* EXPORT MODAL (EDIT PDF CONTENT) */}
+        {/* EXPORT MODAL (EDIT PDF CONTENT / SHARE) */}
         {showExportModal && (
             <div className="absolute inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4 animate-fade-in" onClick={() => setShowExportModal(false)}>
                 <div className="w-full max-w-lg bg-white dark:bg-zinc-900 h-[90vh] sm:h-[85vh] rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col relative overflow-hidden animate-slide-up" onClick={e => e.stopPropagation()}>
                     <div className="flex justify-between items-center p-4 border-b border-gray-100 dark:border-gray-800 shrink-0">
                         <div>
-                            <h3 className="text-lg font-bold text-gray-800 dark:text-white flex items-center gap-2"><span className="material-symbols-outlined text-miel">edit_document</span> Editar Reporte</h3>
-                            <p className="text-[10px] text-gray-500">Edita los datos antes de generar el PDF.</p>
+                            <h3 className="text-lg font-bold text-gray-800 dark:text-white flex items-center gap-2"><span className="material-symbols-outlined text-miel">edit_document</span> Editar y Exportar</h3>
+                            <p className="text-[10px] text-gray-500">Revise los datos antes de exportar.</p>
                         </div>
                         <button onClick={() => setShowExportModal(false)} className="text-gray-400"><span className="material-symbols-outlined">close</span></button>
                     </div>
@@ -444,11 +513,21 @@ const App: React.FC = () => {
                             </div>
                         ))}
                     </div>
-                    <div className="p-4 bg-white dark:bg-zinc-900 border-t border-gray-100 dark:border-gray-800 shrink-0">
-                         <button onClick={handleDownloadReport} className="w-full bg-azul-header text-white py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 hover:brightness-95 shadow-md">
-                            <span className="material-symbols-outlined text-lg">save_as</span> 
-                            <span>Generar y Guardar PDF</span>
+                    <div className="p-4 bg-white dark:bg-zinc-900 border-t border-gray-100 dark:border-gray-800 shrink-0 grid grid-cols-2 gap-3">
+                         <button onClick={handleShareCredits} className="bg-[#25D366] text-white py-3 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-1 hover:brightness-95">
+                            <span className="material-symbols-outlined text-lg">share</span> <span>WhatsApp</span>
                         </button>
+                        <button onClick={handleDownloadTxt} className="bg-gray-600 text-white py-3 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-1 hover:brightness-95">
+                            <span className="material-symbols-outlined text-lg">text_snippet</span> <span>TXT</span>
+                        </button>
+
+                        {/* Only Director can generate PDF */}
+                        {authMode === 'director' && (
+                             <button onClick={handleDownloadReport} className="col-span-2 bg-azul-header text-white py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 hover:brightness-95 shadow-md">
+                                <span className="material-symbols-outlined text-lg">save_as</span> 
+                                <span>{editingReportId ? 'Actualizar Reporte PDF' : 'Generar Reporte PDF'}</span>
+                            </button>
+                        )}
                     </div>
                 </div>
             </div>
@@ -473,7 +552,10 @@ const App: React.FC = () => {
             <nav className="bg-white dark:bg-background-dark border-t border-gray-200 dark:border-gray-800 h-20 px-2 flex items-center justify-between pb-2 z-20 shrink-0 overflow-x-auto">
                 <NavButton icon="folder_open" label="Explorador" active={view === ViewState.LIST} onClick={() => navigateTo(ViewState.LIST)} />
                 <NavButton icon="checklist" label="Selección" active={view === ViewState.SELECTION} onClick={() => navigateTo(ViewState.SELECTION)} />
-                <NavButton icon="description" label="Reportes" active={view === ViewState.REPORTS} onClick={() => navigateTo(ViewState.REPORTS)} />
+                
+                {/* Reports only for Directors */}
+                {authMode === 'director' && <NavButton icon="description" label="Reportes" active={view === ViewState.REPORTS} onClick={() => navigateTo(ViewState.REPORTS)} />}
+                
                 {authMode === 'admin' && <NavButton icon="playlist_add" label="Producción" active={view === ViewState.PRODUCTIONS} onClick={() => navigateTo(ViewState.PRODUCTIONS)} />}
                 {authMode === 'admin' && <NavButton icon="settings" label="Ajustes" active={view === ViewState.SETTINGS} onClick={() => navigateTo(ViewState.SETTINGS)} />}
             </nav>
