@@ -480,7 +480,8 @@ const App: React.FC = () => {
             )}
 
             {view === ViewState.SETTINGS && authMode === 'admin' && <Settings tracks={tracks} users={users} onAddUser={handleAddUser} onEditUser={handleEditUser} onDeleteUser={handleDeleteUser} onExportUsers={handleExportUsers} onImportUsers={handleImportUsers} currentUser={currentUser} />}
-            {view === ViewState.PRODUCTIONS && authMode === 'admin' && <Productions onAddTracks={(t) => updateTracks(prev => [...prev, ...t])} allTracks={tracks} />}
+            {/* PASS updateTracks TO PRODUCTIONS */}
+            {view === ViewState.PRODUCTIONS && authMode === 'admin' && <Productions onUpdateTracks={updateTracks} allTracks={tracks} />}
             {view === ViewState.REPORTS && authMode === 'director' && <ReportsViewer users={users} onEdit={handleEditReport} currentUser={currentUser} />}
             {view === ViewState.GUIDE && <Guide />}
             {view === ViewState.RESULTS && selectedTrack && <CreditResults originalTrack={selectedTrack} foundCredits={foundCredits} isLoading={isSearching} onApply={handleApplyCredits} onDiscard={handleDiscardResults} />}

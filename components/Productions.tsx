@@ -1,5 +1,4 @@
-
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Track, PROGRAMS_LIST, Report } from '../types';
 import { extractTextFromPDF } from '../services/pdfService';
 import { loadReportsFromDB } from '../services/db';
@@ -7,16 +6,16 @@ import * as docx from 'docx';
 import * as XLSX from 'xlsx';
 
 interface ProductionsProps {
-  onAddTracks: (tracks: Track[]) => void;
+  onUpdateTracks: (updateFunc: (prev: Track[]) => Track[]) => void;
   allTracks?: Track[];
 }
 
-const Productions: React.FC<ProductionsProps> = ({ onAddTracks, allTracks = [] }) => {
+const Productions: React.FC<ProductionsProps> = ({ onUpdateTracks, allTracks = [] }) => {
   const [entryDate, setEntryDate] = useState(new Date().toISOString().split('T')[0]);
   const [entryProgram, setEntryProgram] = useState(PROGRAMS_LIST[0]);
   const [pdfProcessing, setPdfProcessing] = useState(false);
   
-  // Report State
+  // Report Dashboard State
   const [reportStartDate, setReportStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [reportEndDate, setReportEndDate] = useState(new Date().toISOString().split('T')[0]);
   const [reportProgram, setReportProgram] = useState(PROGRAMS_LIST[0]);
@@ -24,13 +23,13 @@ const Productions: React.FC<ProductionsProps> = ({ onAddTracks, allTracks = [] }
   const [showGlobalStats, setShowGlobalStats] = useState(false);
   const [globalReports, setGlobalReports] = useState<Report[]>([]);
 
+  // Loaded Batches Modal State
+  const [showLoadedBatches, setShowLoadedBatches] = useState(false);
+  const [batchFilterDate, setBatchFilterDate] = useState('');
+  const [batchFilterProgram, setBatchFilterProgram] = useState('');
+
   // PARSER SPECIFIC FOR REPORT PDF FORMAT
-  // Format:
-  // [1] Title
-  // Autor: Name (Country)
-  // Intérprete: Name (Country)
-  // Género: ...
-  const parseReportText = (text: string): Track[] => {
+  const parseReportText = (text: string, currentProgram: string, currentDate: string): Track[] => {
     const lines = text.split('\n');
     const tracks: Track[] = [];
     let currentTrack: Partial<Track['metadata']> | null = null;
@@ -39,7 +38,7 @@ const Productions: React.FC<ProductionsProps> = ({ onAddTracks, allTracks = [] }
     const saveCurrent = () => {
         if (currentTrack && currentTrack.title) {
             tracks.push({
-                id: `imp-${Date.now()}-${currentId++}`,
+                id: `imp-${Date.now()}-${Math.random().toString(36).substr(2, 5)}-${currentId++}`,
                 filename: `${currentTrack.title}.mp3`,
                 path: 'Importado PDF',
                 isVerified: true,
@@ -50,15 +49,15 @@ const Productions: React.FC<ProductionsProps> = ({ onAddTracks, allTracks = [] }
                     performer: currentTrack.performer || 'Desconocido',
                     performerCountry: currentTrack.performerCountry || '',
                     genre: currentTrack.genre || '',
-                    album: `Producción: ${entryProgram} (${entryDate})`,
-                    year: entryDate.split('-')[0]
+                    // The Album field acts as the Batch ID
+                    album: `Producción: ${currentProgram} (${currentDate})`,
+                    year: currentDate.split('-')[0]
                 }
             } as Track);
         }
     };
 
     const extractNameCountry = (str: string) => {
-        // Regex: Matches "Name (Country)" taking the last parenthesis group
         const match = str.match(/^(.*?)\s*\(([^)]+)\)$/);
         if (match) return { name: match[1].trim(), country: match[2].trim() };
         return { name: str.trim(), country: '' };
@@ -66,7 +65,6 @@ const Productions: React.FC<ProductionsProps> = ({ onAddTracks, allTracks = [] }
 
     lines.forEach(line => {
         const l = line.trim();
-        // Match [1] Title or [10] Title
         const titleMatch = l.match(/^\[\d+\]\s+(.+)/);
         
         if (titleMatch) {
@@ -94,30 +92,90 @@ const Productions: React.FC<ProductionsProps> = ({ onAddTracks, allTracks = [] }
 
   const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
       if (!e.target.files || e.target.files.length === 0) return;
-      const file = e.target.files[0];
+      const files: File[] = Array.from(e.target.files);
       
       setPdfProcessing(true);
+      let totalTracks = 0;
+      let filesProcessed = 0;
+
+      const newTracksBuffer: Track[] = [];
+
       try {
-          const text = await extractTextFromPDF(file);
-          const tracks = parseReportText(text); 
-          
-          if (tracks.length === 0) {
-              alert("No se detectaron pistas válidas en el PDF. Asegúrese que sea un Reporte Oficial.");
+          // Process files sequentially or parallel (Promise.all is fine)
+          await Promise.all(files.map(async (file) => {
+              try {
+                  const text = await extractTextFromPDF(file);
+                  // We use the current state date/program for ALL files in this batch upload
+                  // Alternatively, one could try to parse date/program from PDF text if available.
+                  // For now, consistent with requirements, use the input fields.
+                  const fileTracks = parseReportText(text, entryProgram, entryDate);
+                  if (fileTracks.length > 0) {
+                      newTracksBuffer.push(...fileTracks);
+                      totalTracks += fileTracks.length;
+                  }
+                  filesProcessed++;
+              } catch (err) {
+                  console.error(`Error processing ${file.name}`, err);
+              }
+          }));
+
+          if (totalTracks > 0) {
+              onUpdateTracks(prev => [...prev, ...newTracksBuffer]);
+              alert(`${totalTracks} pistas extraídas de ${filesProcessed} archivo(s).`);
           } else {
-              onAddTracks(tracks);
-              alert(`${tracks.length} pistas extraídas del Reporte PDF correctamente.`);
+              alert("No se detectaron pistas válidas. Asegúrese de usar Reportes Oficiales.");
           }
       } catch (err) {
-          alert("Error leyendo el PDF.");
+          alert("Error general leyendo archivos.");
       } finally {
           setPdfProcessing(false);
-          e.target.value = ''; // Reset input
+          e.target.value = ''; 
       }
   };
 
+  // --- BATCH MANAGEMENT ---
+  // Derive loaded batches from allTracks
+  const loadedBatches = useMemo(() => {
+      const batches: Record<string, { program: string, date: string, count: number, id: string }> = {};
+      
+      allTracks.forEach(t => {
+          if (t.path === 'Importado PDF' && t.metadata.album?.startsWith('Producción:')) {
+              const batchId = t.metadata.album;
+              if (!batches[batchId]) {
+                  // Parse "Producción: Program Name (YYYY-MM-DD)"
+                  const match = batchId.match(/Producción: (.*) \(([\d-]+)\)$/);
+                  const prog = match ? match[1] : 'Desconocido';
+                  const date = match ? match[2] : 'Desconocido';
+                  
+                  batches[batchId] = {
+                      id: batchId,
+                      program: prog,
+                      date: date,
+                      count: 0
+                  };
+              }
+              batches[batchId].count++;
+          }
+      });
+      
+      return Object.values(batches).sort((a,b) => b.date.localeCompare(a.date));
+  }, [allTracks]);
+
+  const filteredBatches = loadedBatches.filter(b => {
+      const dateMatch = batchFilterDate ? b.date === batchFilterDate : true;
+      const progMatch = batchFilterProgram ? b.program === batchFilterProgram : true;
+      return dateMatch && progMatch;
+  });
+
+  const handleDeleteBatch = (batchId: string) => {
+      if (window.confirm("¿Estás seguro de eliminar este lote de pistas importadas?")) {
+          onUpdateTracks(prev => prev.filter(t => t.metadata.album !== batchId));
+      }
+  };
+
+
   // --- REPORTING LOGIC ---
   const handleOpenGlobalStats = async () => {
-      // Load all reports from DB
       const reports = await loadReportsFromDB();
       setGlobalReports(reports);
       setShowGlobalStats(true);
@@ -248,23 +306,34 @@ const Productions: React.FC<ProductionsProps> = ({ onAddTracks, allTracks = [] }
             </div>
 
             {/* PDF Entry */}
-            <div className="flex flex-col">
-                <label className="block text-xs font-bold text-gray-500 mb-2">Importar Reporte PDF (Oficial)</label>
-                <div className="bg-white dark:bg-zinc-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 shadow-sm flex items-center justify-center border-dashed border-2 hover:border-primary transition-colors">
-                    {pdfProcessing ? (
-                        <div className="flex flex-col items-center gap-2">
-                            <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
-                            <span className="text-xs text-gray-500">Procesando Reporte...</span>
-                        </div>
-                    ) : (
-                        <label className="cursor-pointer flex flex-col items-center gap-2 group w-full">
-                            <span className="material-symbols-outlined text-4xl text-gray-300 group-hover:text-primary transition-colors">upload_file</span>
-                            <span className="text-sm font-bold text-gray-500 group-hover:text-primary">Seleccionar PDF de Reporte</span>
-                            <input type="file" accept=".pdf" onChange={handlePdfUpload} className="hidden" />
-                        </label>
-                    )}
+            <div className="flex flex-col gap-3">
+                <div>
+                    <label className="block text-xs font-bold text-gray-500 mb-2">Importar Reporte PDF (Oficial)</label>
+                    <div className="bg-white dark:bg-zinc-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 shadow-sm flex items-center justify-center border-dashed border-2 hover:border-primary transition-colors">
+                        {pdfProcessing ? (
+                            <div className="flex flex-col items-center gap-2">
+                                <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+                                <span className="text-xs text-gray-500">Procesando Reporte...</span>
+                            </div>
+                        ) : (
+                            <label className="cursor-pointer flex flex-col items-center gap-2 group w-full">
+                                <span className="material-symbols-outlined text-4xl text-gray-300 group-hover:text-primary transition-colors">upload_file</span>
+                                <span className="text-sm font-bold text-gray-500 group-hover:text-primary">Seleccionar PDF(s) de Reporte</span>
+                                {/* Added multiple */}
+                                <input type="file" accept=".pdf" multiple onChange={handlePdfUpload} className="hidden" />
+                            </label>
+                        )}
+                    </div>
                 </div>
-                <p className="text-[10px] text-gray-400 mt-2 text-center">Solo se admiten reportes PDF generados por la aplicación (PM-...).</p>
+
+                {/* PDFs Cargados Button */}
+                <button 
+                    onClick={() => setShowLoadedBatches(true)}
+                    className="bg-gray-100 dark:bg-white/5 hover:bg-gray-200 text-gray-600 dark:text-gray-300 py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2 border border-gray-200 dark:border-white/10"
+                >
+                    <span className="material-symbols-outlined">history</span>
+                    Ver PDFs Cargados ({loadedBatches.length})
+                </button>
             </div>
         </div>
 
@@ -304,6 +373,48 @@ const Productions: React.FC<ProductionsProps> = ({ onAddTracks, allTracks = [] }
                 </div>
             </div>
         </div>
+
+        {/* LOADED BATCHES MODAL */}
+        {showLoadedBatches && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in" onClick={() => setShowLoadedBatches(false)}>
+                <div className="bg-white dark:bg-zinc-900 w-full max-w-lg rounded-2xl p-6 shadow-2xl flex flex-col h-[70vh]" onClick={e => e.stopPropagation()}>
+                    <div className="flex justify-between items-center mb-4 border-b border-gray-100 dark:border-white/10 pb-2">
+                         <h3 className="text-lg font-bold text-gray-800 dark:text-white">PDFs / Lotes Cargados</h3>
+                         <button onClick={() => setShowLoadedBatches(false)} className="text-gray-400 hover:text-red-500"><span className="material-symbols-outlined">close</span></button>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 mb-4 text-xs">
+                        <select value={batchFilterProgram} onChange={e => setBatchFilterProgram(e.target.value)} className="p-2 border rounded dark:bg-zinc-800 dark:border-gray-700">
+                             <option value="">Todos los programas</option>
+                             {PROGRAMS_LIST.map(p => <option key={p} value={p}>{p}</option>)}
+                        </select>
+                        <input type="date" value={batchFilterDate} onChange={e => setBatchFilterDate(e.target.value)} className="p-2 border rounded dark:bg-zinc-800 dark:border-gray-700" />
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto space-y-3">
+                        {filteredBatches.length === 0 ? (
+                            <p className="text-center text-gray-400 text-sm py-10">No hay lotes cargados (o no coinciden con el filtro)</p>
+                        ) : (
+                            filteredBatches.map(batch => (
+                                <div key={batch.id} className="bg-gray-50 dark:bg-white/5 p-3 rounded-lg border border-gray-200 dark:border-white/10 flex justify-between items-center">
+                                    <div>
+                                        <p className="font-bold text-sm text-gray-800 dark:text-white">{batch.program}</p>
+                                        <p className="text-xs text-gray-500">{batch.date} • {batch.count} pistas</p>
+                                    </div>
+                                    <button 
+                                        onClick={() => handleDeleteBatch(batch.id)}
+                                        className="text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 p-2 rounded-full transition-colors"
+                                        title="Eliminar este lote"
+                                    >
+                                        <span className="material-symbols-outlined text-lg">delete</span>
+                                    </button>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </div>
+            </div>
+        )}
 
         {/* GLOBAL STATS MODAL */}
         {showGlobalStats && (

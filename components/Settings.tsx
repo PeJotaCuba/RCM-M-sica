@@ -212,19 +212,19 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
                         <p className="text-xs text-gray-500 mb-1">@{user.username}</p>
                         {user.phone && <p className="text-xs text-gray-400 flex items-center gap-1 mb-3"><span className="material-symbols-outlined text-[14px]">call</span> {user.phone}</p>}
                         
-                        {/* Enlarged Buttons */}
-                        <div className="flex gap-2 mt-4 pt-3 border-t border-gray-50 dark:border-white/5">
-                            <button onClick={() => handleEditClick(user)} className="flex-1 py-2 rounded-lg bg-gray-100 dark:bg-white/10 text-xs font-bold text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-white/20 flex items-center justify-center gap-1">
+                        {/* Compact Buttons */}
+                        <div className="flex gap-2 mt-2 pt-2 border-t border-gray-50 dark:border-white/5">
+                            <button onClick={() => handleEditClick(user)} className="flex-1 py-1.5 rounded bg-gray-50 dark:bg-white/5 text-xs font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/10 flex items-center justify-center gap-1">
                                 <span className="material-symbols-outlined text-sm">edit</span> Editar
                             </button>
                             {user.phone && (
-                                <button onClick={() => handleShareWhatsApp(user)} className="px-3 rounded-lg bg-green-50 text-green-600 hover:bg-green-100 border border-green-200 flex items-center justify-center" title="WhatsApp">
-                                    <span className="material-symbols-outlined text-lg">chat</span>
+                                <button onClick={() => handleShareWhatsApp(user)} className="size-7 flex items-center justify-center rounded bg-green-50 text-green-600 hover:bg-green-100 border border-green-200" title="WhatsApp">
+                                    <span className="material-symbols-outlined text-sm">chat</span>
                                 </button>
                             )}
                             {canDelete(user) && (
-                                <button onClick={() => handleDeleteConfirm(user.username)} className="px-3 rounded-lg bg-red-50 text-red-500 hover:bg-red-100 border border-red-200 flex items-center justify-center" title="Eliminar">
-                                    <span className="material-symbols-outlined text-lg">delete</span>
+                                <button onClick={() => handleDeleteConfirm(user.username)} className="size-7 flex items-center justify-center rounded bg-red-50 text-red-500 hover:bg-red-100 border border-red-200" title="Eliminar">
+                                    <span className="material-symbols-outlined text-sm">delete</span>
                                 </button>
                             )}
                         </div>
