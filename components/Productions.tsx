@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo } from 'react';
 import { Track, PROGRAMS_LIST, Report } from '../types';
 import { extractTextFromPDF } from '../services/pdfService';
@@ -30,6 +31,7 @@ const Productions: React.FC<ProductionsProps> = ({ onUpdateTracks, allTracks = [
 
   // PARSER SPECIFIC FOR REPORT PDF FORMAT
   const parseReportText = (text: string, currentProgram: string, currentDate: string): Track[] => {
+    // IMPORTANT: Splitting by newline works because pdfService now joins with \n
     const lines = text.split('\n');
     const tracks: Track[] = [];
     let currentTrack: Partial<Track['metadata']> | null = null;
@@ -58,6 +60,8 @@ const Productions: React.FC<ProductionsProps> = ({ onUpdateTracks, allTracks = [
     };
 
     const extractNameCountry = (str: string) => {
+        // Regex to capture "Name (Country)"
+        // Handles cases with spacing: "Name   (Country)"
         const match = str.match(/^(.*?)\s*\(([^)]+)\)$/);
         if (match) return { name: match[1].trim(), country: match[2].trim() };
         return { name: str.trim(), country: '' };
@@ -65,6 +69,7 @@ const Productions: React.FC<ProductionsProps> = ({ onUpdateTracks, allTracks = [
 
     lines.forEach(line => {
         const l = line.trim();
+        // Regex to capture "[1] Title"
         const titleMatch = l.match(/^\[\d+\]\s+(.+)/);
         
         if (titleMatch) {
@@ -77,6 +82,7 @@ const Productions: React.FC<ProductionsProps> = ({ onUpdateTracks, allTracks = [
                 currentTrack.author = name;
                 currentTrack.authorCountry = country;
             } else if (l.toLowerCase().startsWith('intérprete:') || l.toLowerCase().startsWith('interprete:')) {
+                // Length 11 matches "Intérprete:" (11 chars)
                 const raw = l.substring(11).trim();
                 const { name, country } = extractNameCountry(raw);
                 currentTrack.performer = name;

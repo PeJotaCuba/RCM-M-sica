@@ -3,7 +3,6 @@ import { jsPDF } from "jspdf";
 import * as pdfjsLib from 'pdfjs-dist';
 
 // Corrección para estructura de importación ESM/CDN donde las exportaciones pueden estar en 'default'.
-// Esto soluciona el error "Cannot set properties of undefined (setting 'workerSrc')"
 const pdfjs = (pdfjsLib as any).default || pdfjsLib;
 
 // Configurar worker de PDF.js usando CDN
@@ -42,7 +41,6 @@ export const generateReportPDF = (data: ReportData): Blob => {
 
     doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
-    // Cambiado de "Usuario" a "Director(a)"
     doc.text(`Director(a): ${data.userFullName}`, 20, 45);
     doc.text(`Fecha: ${today}`, 20, 50);
     doc.text(`Programa: ${data.program || 'Sin Especificar'}`, 20, 55);
@@ -103,14 +101,17 @@ export const generateReportPDF = (data: ReportData): Blob => {
 export const extractTextFromPDF = async (file: File): Promise<string> => {
     try {
         const arrayBuffer = await file.arrayBuffer();
-        // Usar el objeto pdfjs resuelto correctamente
         const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
         let fullText = '';
 
         for (let i = 1; i <= pdf.numPages; i++) {
             const page = await pdf.getPage(i);
             const textContent = await page.getTextContent();
-            const pageText = textContent.items.map((item: any) => item.str).join(' ');
+            
+            // IMPORTANT: Join with newline characters to preserve vertical layout logic
+            // This fixes the issue where "[1] Title" was merging with previous lines
+            const pageText = textContent.items.map((item: any) => item.str).join('\n');
+            
             fullText += pageText + '\n';
         }
 
