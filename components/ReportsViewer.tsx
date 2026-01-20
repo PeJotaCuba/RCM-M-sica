@@ -6,29 +6,50 @@ import { loadReportsFromDB, deleteReportFromDB, updateReportStatus } from '../se
 interface ReportsViewerProps {
     users?: User[]; 
     onEdit: (report: Report) => void;
+    currentUser?: User | null;
 }
 
-const ReportsViewer: React.FC<ReportsViewerProps> = ({ users = [], onEdit }) => {
+const ReportsViewer: React.FC<ReportsViewerProps> = ({ users = [], onEdit, currentUser }) => {
     const [reports, setReports] = useState<Report[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [showSummary, setShowSummary] = useState(false);
+    const [showTutorial, setShowTutorial] = useState(false);
 
     useEffect(() => {
+        // Tutorial Check
+        const seen = localStorage.getItem('rcm_tut_reports');
+        if (!seen) {
+            setShowTutorial(true);
+        }
         loadData();
     }, []);
 
+    const closeTutorial = () => {
+        localStorage.setItem('rcm_tut_reports', 'true');
+        setShowTutorial(false);
+    };
+
     const loadData = async () => {
         setIsLoading(true);
-        const data = await loadReportsFromDB();
+        // If currentUser is passed, filter by that user. If not (Admin context implied or global), load all.
+        // Director view MUST pass currentUser.
+        const filterUser = currentUser ? currentUser.username : undefined;
+        const data = await loadReportsFromDB(filterUser);
         setReports(data);
         setIsLoading(false);
     };
 
     const handleDownload = async (report: Report) => {
+        // Format: PM-Programa-Fecha
+        // Extract plain date YYYY-MM-DD from ISO string
+        const datePart = new Date(report.date).toISOString().split('T')[0];
+        const safeProgram = report.program.replace(/[^a-zA-Z0-9]/g, '-');
+        const downloadName = `PM-${safeProgram}-${datePart}.pdf`;
+
         const url = URL.createObjectURL(report.pdfBlob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = report.fileName;
+        a.download = downloadName;
         document.body.appendChild(a);
         a.click();
         URL.revokeObjectURL(url);
@@ -66,7 +87,7 @@ const ReportsViewer: React.FC<ReportsViewerProps> = ({ users = [], onEdit }) => 
             <div className="flex justify-between items-center mb-6">
                 <h2 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
                     <span className="material-symbols-outlined text-miel">description</span>
-                    Reportes (Directores)
+                    Reportes
                 </h2>
                 <button 
                     onClick={() => setShowSummary(true)}
@@ -77,6 +98,20 @@ const ReportsViewer: React.FC<ReportsViewerProps> = ({ users = [], onEdit }) => 
                 </button>
             </div>
 
+            {/* TUTORIAL DIALOG */}
+            {showTutorial && (
+                 <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 p-4 rounded-xl mb-6 flex gap-3 animate-fade-in relative">
+                    <span className="material-symbols-outlined text-azul-header dark:text-blue-400 text-2xl">info</span>
+                    <div className="flex-1">
+                        <h4 className="font-bold text-azul-header dark:text-blue-300 text-sm mb-1">Tus Reportes Personales</h4>
+                        <p className="text-xs text-gray-600 dark:text-gray-300">Aquí se guardan automáticamente los PDFs que generas. Solo tú puedes verlos. Puedes descargarlos, re-editarlos o ver un resumen de tu actividad.</p>
+                    </div>
+                    <button onClick={closeTutorial} className="absolute top-2 right-2 text-gray-400 hover:text-gray-600">
+                        <span className="material-symbols-outlined text-sm">close</span>
+                    </button>
+                </div>
+            )}
+
             {isLoading ? (
                 <div className="flex justify-center py-10">
                     <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
@@ -85,6 +120,7 @@ const ReportsViewer: React.FC<ReportsViewerProps> = ({ users = [], onEdit }) => 
                 <div className="flex flex-col items-center justify-center py-20 text-gray-400">
                     <span className="material-symbols-outlined text-5xl mb-4 opacity-50">folder_off</span>
                     <p>No hay reportes generados.</p>
+                    <p className="text-xs mt-2">Los reportes generados en la sección de Selección aparecerán aquí.</p>
                 </div>
             ) : (
                 <div className="grid gap-4">
@@ -105,7 +141,7 @@ const ReportsViewer: React.FC<ReportsViewerProps> = ({ users = [], onEdit }) => 
                                         <span className="flex items-center gap-1"><span className="material-symbols-outlined text-[10px]">calendar_today</span> {new Date(report.date).toLocaleDateString()}</span>
                                         <span className="flex items-center gap-1 truncate"><span className="material-symbols-outlined text-[10px]">radio</span> {report.program}</span>
                                     </div>
-                                    <p className="text-[10px] text-gray-400 mt-1 truncate">Director(a): {report.generatedBy}</p>
+                                    <p className="text-[10px] text-gray-400 mt-1 truncate">Generado por: {report.generatedBy}</p>
                                 </div>
                             </div>
 

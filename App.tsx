@@ -9,6 +9,7 @@ import LoginScreen from './components/LoginScreen';
 import Settings from './components/Settings';
 import Productions from './components/Productions';
 import ReportsViewer from './components/ReportsViewer';
+import Guide from './components/Guide';
 import { fetchCreditsFromGemini } from './services/geminiService';
 import { loadTracksFromDB, saveTracksToDB, saveReportToDB } from './services/db'; 
 import { generateReportPDF } from './services/pdfService';
@@ -24,7 +25,7 @@ const DB_URLS: Record<string, string> = {
     'Música 3': 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/mdatos3.json',
     'Música 4': 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/mdatos4.json', 
     'Música 5': 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/mdatos5.json',
-    'Otros': 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/mdatos6.json'
+    'Otros': 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/motros.json'
 };
 
 const USERS_DB_URL = 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/musuarios.json';
@@ -68,12 +69,15 @@ const App: React.FC = () => {
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportItems, setExportItems] = useState<ExportItem[]>([]);
   const [programName, setProgramName] = useState(PROGRAMS_LIST[0]);
-  const [editingReportId, setEditingReportId] = useState<string | null>(null); // To track if we are updating an existing report
+  const [editingReportId, setEditingReportId] = useState<string | null>(null); 
 
   const [foundCredits, setFoundCredits] = useState<CreditInfo | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Tutorial State
+  const [showWelcomeTutorial, setShowWelcomeTutorial] = useState(false);
 
   // Upload State
   const [uploadStatus, setUploadStatus] = useState<{
@@ -147,6 +151,21 @@ const App: React.FC = () => {
     initApp();
   }, []);
 
+  // Check for first-time tutorial
+  useEffect(() => {
+      if (view !== ViewState.LOGIN && view !== ViewState.GUIDE) {
+          const hasSeenIntro = localStorage.getItem('rcm_tut_welcome');
+          if (!hasSeenIntro) {
+              setShowWelcomeTutorial(true);
+          }
+      }
+  }, [view]);
+
+  const handleCloseTutorial = () => {
+      localStorage.setItem('rcm_tut_welcome', 'true');
+      setShowWelcomeTutorial(false);
+  };
+
   const handleLoginSuccess = (user: User) => {
     const existingUser = users.find(u => u.username === user.username);
     if (existingUser && !user.uniqueId) { user.uniqueId = generateUniqueId(user.fullName); updateUsers(users.map(u => u.username === user.username ? user : u)); }
@@ -158,39 +177,45 @@ const App: React.FC = () => {
   };
 
   const handleAddUser = (u: User) => updateUsers([...users, u]);
-  // Updated signature to allow username change
   const handleEditUser = (updatedUser: User, originalUsername?: string) => {
       const targetUsername = originalUsername || updatedUser.username;
       updateUsers(users.map(u => u.username === targetUsername ? updatedUser : u));
   };
   const handleDeleteUser = (username: string) => { if (users.length <= 1) return alert("Error"); updateUsers(users.filter(u => u.username !== username)); };
   
-  // New Bulk Import Function
   const handleImportUsers = (newUsers: User[]) => {
-      // Filter duplicates
       const existingUsernames = new Set(users.map(u => u.username.toLowerCase()));
       const validNewUsers = newUsers.filter(u => !existingUsernames.has(u.username.toLowerCase()));
-      
       if (validNewUsers.length === 0) {
           alert("No se añadieron usuarios (posibles duplicados o archivo vacío).");
           return;
       }
-      
-      // Ensure unique IDs
-      const processedUsers = validNewUsers.map(u => ({
-          ...u,
-          uniqueId: u.uniqueId || generateUniqueId(u.fullName)
-      }));
-
+      const processedUsers = validNewUsers.map(u => ({ ...u, uniqueId: u.uniqueId || generateUniqueId(u.fullName) }));
       updateUsers([...users, ...processedUsers]);
       alert(`${processedUsers.length} usuarios importados correctamente.`);
   };
 
-  const handleSyncUsers = async () => { /* ... same ... */ setIsUpdating(true); try { const r = await fetch(USERS_DB_URL); const j = await r.json(); updateUsers(j); alert("Ok"); if(view===ViewState.LOGIN) window.location.reload(); } catch(e){ alert("Err"); } finally { setIsUpdating(false); } };
-  const handleSyncMusicRoot = async (rootName: string) => { /* ... same ... */ const url = DB_URLS[rootName]; if(!url) return; if(!confirm("Sync?")) return; setIsUpdating(true); try { const r = await fetch(url); const n = await r.json(); const k = tracks.filter(t => !t.path.startsWith(rootName)); await updateTracks([...k, ...n]); alert("Ok"); } catch(e){ alert("Err"); } finally { setIsUpdating(false); } };
-  const handleClearMusicRoot = async (rootName: string) => { if(!confirm("Del?")) return; const k = tracks.filter(t => !t.path.startsWith(rootName)); await updateTracks(k); alert("Ok"); };
+  const handleSyncUsersAndApp = async () => {
+      setIsUpdating(true);
+      try {
+          // 1. Sync Users
+          const r = await fetch(USERS_DB_URL);
+          const j = await r.json();
+          updateUsers(j);
+          
+          alert("Base de datos actualizada correctamente. La aplicación se reiniciará.");
+          window.location.reload(); 
+      } catch(e) {
+          alert("Error al conectar con el servidor. Verifique su conexión.");
+      } finally {
+          setIsUpdating(false);
+      }
+  };
+
+  const handleSyncMusicRoot = async (rootName: string) => { const url = DB_URLS[rootName]; if(!url) return; if(!confirm("¿Desea sincronizar esta carpeta?")) return; setIsUpdating(true); try { const r = await fetch(url); const n = await r.json(); const k = tracks.filter(t => !t.path.startsWith(rootName)); await updateTracks([...k, ...n]); alert("Sincronización completada con éxito."); } catch(e){ alert("Error de conexión."); } finally { setIsUpdating(false); } };
+  const handleClearMusicRoot = async (rootName: string) => { if(!confirm("¿Eliminar datos locales?")) return; const k = tracks.filter(t => !t.path.startsWith(rootName)); await updateTracks(k); alert("Datos eliminados."); };
   const handleExportMusicRoot = (rootName: string) => { if(authMode!=='admin') return; const k = tracks.filter(t => t.path.startsWith(rootName)); if(k.length===0) return; const a = document.createElement('a'); a.href = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(k)); a.download = "data.json"; a.click(); };
-  const handleExportUsers = () => { if(authMode!=='admin') return; const a = document.createElement('a'); a.href = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(users)); a.download = "users.json"; a.click(); };
+  const handleExportUsers = () => { if(authMode!=='admin') return; const a = document.createElement('a'); a.href = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(users)); a.download = "musuarios.json"; a.click(); };
 
   const readFileAsText = (file: File): Promise<string> => {
       return new Promise((resolve, reject) => {
@@ -201,7 +226,6 @@ const App: React.FC = () => {
       });
   };
 
-  // --- SMART TXT UPLOAD ---
   const handleUploadMultipleTxt = async (files: FileList, targetRoot: string) => {
       if (authMode !== 'admin') return alert("Solo Admin.");
       if (!files || files.length === 0) return;
@@ -213,7 +237,7 @@ const App: React.FC = () => {
       try {
           for (let i = 0; i < filesArray.length; i++) {
               setUploadStatus(prev => ({ ...prev, currentFile: i + 1, currentFileName: filesArray[i].name }));
-              await new Promise(r => setTimeout(r, 20)); // UI flush
+              await new Promise(r => setTimeout(r, 20)); 
               try {
                   const text = await readFileAsText(filesArray[i]);
                   const t = parseTxtDatabase(text, targetRoot);
@@ -223,22 +247,16 @@ const App: React.FC = () => {
 
           if (parsedTracks.length > 0) {
               setUploadStatus(prev => ({ ...prev, currentFileName: 'Integrando datos...' }));
-              
               await updateTracks(currentTracks => {
                   const updatedList = [...currentTracks];
                   let addedCount = 0;
                   let updatedCount = 0;
-
                   parsedTracks.forEach(newT => {
-                      // Find duplicate by path + filename
                       const existingIndex = updatedList.findIndex(ex => ex.path === newT.path && ex.filename === newT.filename);
-                      
                       if (existingIndex > -1) {
-                          // Merge Strategy: Only fill if empty/"Desconocido"
                           const existing = updatedList[existingIndex];
                           const merged = { ...existing };
                           let changed = false;
-
                           const fields = ['title', 'author', 'performer', 'genre', 'album', 'year'] as const;
                           fields.forEach(f => {
                               const existingVal = existing.metadata[f];
@@ -249,16 +267,8 @@ const App: React.FC = () => {
                                   changed = true;
                               }
                           });
-                          
-                          if (changed) {
-                              updatedList[existingIndex] = merged;
-                              updatedCount++;
-                          }
-                      } else {
-                          // Add new
-                          updatedList.push(newT);
-                          addedCount++;
-                      }
+                          if (changed) { updatedList[existingIndex] = merged; updatedCount++; }
+                      } else { updatedList.push(newT); addedCount++; }
                   });
                   alert(`Proceso finalizado.\nNuevos: ${addedCount}\nActualizados: ${updatedCount}`);
                   return updatedList;
@@ -267,7 +277,7 @@ const App: React.FC = () => {
       } catch (e) { console.error(e); alert("Error."); } finally { setUploadStatus(prev => ({ ...prev, isUploading: false })); }
   };
 
-  const performBulkSearch = (text: string) => { /* ... same logic ... */ 
+  const performBulkSearch = (text: string) => { 
        const lines = text.split('\n').map(l => l.trim()).filter(l => l);
       if (lines.length === 0) return alert("Sin datos.");
       const queries = lines.map(line => {
@@ -279,17 +289,12 @@ const App: React.FC = () => {
           }
           return { title: line, raw: line };
       });
-
-      // Simple token matching
       const normalize = (s:string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
-      
       let newSelection = [...selectedTracksList];
       let missing: string[] = [];
-
       queries.forEach(q => {
           const tQ = normalize(q.title || "");
           const pQ = normalize(q.performer || "");
-          
           const match = tracks.find(t => {
                const tT = normalize(t.metadata.title);
                const tP = normalize(t.metadata.performer);
@@ -297,12 +302,8 @@ const App: React.FC = () => {
                const perfMatch = pQ ? tP.includes(pQ) : true;
                return titleMatch && perfMatch;
           });
-
-          if(match) {
-               if(!newSelection.find(s=>s.id===match.id)) newSelection.push(match);
-          } else {
-               missing.push(q.raw);
-          }
+          if(match) { if(!newSelection.find(s=>s.id===match.id)) newSelection.push(match); } 
+          else { missing.push(q.raw); }
       });
       setSelectedTracksList(newSelection);
       setMissingQueries(missing);
@@ -312,7 +313,7 @@ const App: React.FC = () => {
   const handleWishlistSubmit = () => { if(!wishlistText.trim()) return; performBulkSearch(wishlistText); setShowWishlist(false); setWishlistText(''); };
   const handleSelectTrack = (track: Track) => { setSelectedTrack(track); };
   const handleToggleSelection = (track: Track) => { setSelectedTracksList(prev => prev.find(t => t.id === track.id) ? prev.filter(t => t.id !== track.id) : [...prev, track]); };
-  const handleClearSelection = () => { if (window.confirm('¿Limpiar?')) { setSelectedTracksList([]); setMissingQueries([]); } };
+  const handleClearSelection = () => { if (window.confirm('¿Limpiar selección?')) { setSelectedTracksList([]); setMissingQueries([]); } };
 
   const handleOpenExportModal = () => {
       setEditingReportId(null);
@@ -347,7 +348,6 @@ const App: React.FC = () => {
       URL.revokeObjectURL(url);
   };
 
-  // --- PDF REPORT & STORAGE ---
   const handleDownloadReport = async () => {
       if (!currentUser) return;
       const pdfBlob = generateReportPDF({
@@ -356,13 +356,9 @@ const App: React.FC = () => {
           program: programName,
           items: exportItems
       });
-
-      // Save to IndexedDB
-      // Format Name: Produccion Musical + programa + fecha
       const dateStr = new Date().toLocaleDateString('es-ES').replace(/\//g, '-');
       const safeProgram = programName.replace(/[^a-zA-Z0-9 ]/g, '');
-      const fileName = `Produccion Musical ${safeProgram} ${dateStr}.pdf`;
-
+      const fileName = `PM-${safeProgram}-${dateStr}.pdf`;
       const reportId = editingReportId || `rep-${Date.now()}`;
       
       await saveReportToDB({
@@ -372,10 +368,9 @@ const App: React.FC = () => {
           generatedBy: currentUser.username,
           fileName: fileName,
           pdfBlob: pdfBlob,
-          items: exportItems, // Guardar items para re-editar
+          items: exportItems,
           status: { downloaded: false, sent: false }
       });
-
       alert("Reporte generado correctamente.\nPuede encontrarlo en la sección 'Reportes' para descargarlo.");
       setShowExportModal(false);
       setEditingReportId(null);
@@ -387,53 +382,40 @@ const App: React.FC = () => {
           setProgramName(report.program);
           setEditingReportId(report.id);
           setShowExportModal(true);
-      } else {
-          alert("Este reporte es antiguo y no contiene los datos necesarios para editarlo.");
-      }
+      } else { alert("Reporte antiguo no editable."); }
   };
 
-  // --- GLOBAL METADATA UPDATE ---
   const handleManualEdit = (updatedTrack: Track) => {
       const normalize = (s:string) => s.toLowerCase().normalize("NFD").replace(/[^a-z0-9]/g, "");
       const targetTitle = normalize(updatedTrack.metadata.title);
       const targetPerf = normalize(updatedTrack.metadata.performer);
-
       updateTracks(prev => prev.map(t => {
           if (t.id === updatedTrack.id) return updatedTrack;
           const tTitle = normalize(t.metadata.title);
           const tPerf = normalize(t.metadata.performer);
-          
           if (tTitle === targetTitle && tPerf === targetPerf) {
-             return {
-                 ...t,
-                 metadata: {
-                     ...t.metadata,
-                     author: updatedTrack.metadata.author,
-                     authorCountry: updatedTrack.metadata.authorCountry,
-                     performerCountry: updatedTrack.metadata.performerCountry,
-                     genre: updatedTrack.metadata.genre
-                 }
-             };
+             return { ...t, metadata: { ...t.metadata, author: updatedTrack.metadata.author, authorCountry: updatedTrack.metadata.authorCountry, performerCountry: updatedTrack.metadata.performerCountry, genre: updatedTrack.metadata.genre } };
           }
           return t;
       }));
       setSelectedTrack(updatedTrack);
   };
 
-  const handleApplyCredits = (newCredits: CreditInfo) => { /* ... */ }; 
+  const handleApplyCredits = (newCredits: CreditInfo) => { }; 
   const handleDiscardResults = () => { setView(ViewState.LIST); setFoundCredits(null); };
 
-  if (view === ViewState.LOGIN) { return <LoginScreen onLoginSuccess={handleLoginSuccess} users={users} onUpdateUsers={handleSyncUsers} isUpdating={isUpdating} />; }
+  if (view === ViewState.LOGIN) { return <LoginScreen onLoginSuccess={handleLoginSuccess} users={users} onUpdateUsers={handleSyncUsersAndApp} isUpdating={isUpdating} />; }
   const navigateTo = (v: ViewState) => { setView(v); window.history.pushState({ view: v }, ''); };
 
   const getRoleLabel = () => {
       if (authMode === 'admin') return 'COORDINADOR';
       if (authMode === 'director') return 'DIRECTOR';
-      return 'REALIZADOR'; // Usuario
+      return 'USUARIO';
   };
 
   return (
     <div className="max-w-md mx-auto h-[100dvh] bg-gray-100 shadow-2xl overflow-hidden relative border-x border-gray-200 flex flex-col">
+        {/* HEADER */}
         {view !== ViewState.RESULTS && (
              <header className="bg-azul-header text-white px-4 py-4 flex items-center justify-between shadow-md relative z-20 shrink-0">
                 <button className="flex items-center gap-3" onClick={() => navigateTo(ViewState.LIST)}>
@@ -441,15 +423,25 @@ const App: React.FC = () => {
                 </button>
                 <div className="flex items-center gap-2">
                     {isSaving && <span className="size-2 bg-yellow-400 rounded-full animate-pulse"></span>}
-                    {currentUser && authMode === 'director' && <button onClick={() => alert(`ID:\n${currentUser.uniqueId}`)} className="bg-white/10 text-white rounded-full p-1.5"><span className="material-symbols-outlined text-sm">vpn_key</span></button>}
                     <div className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${authMode === 'admin' ? 'bg-miel' : 'bg-green-600'}`}>
                         {getRoleLabel()}
                     </div>
+                    
+                    {/* Sync Button */}
+                    <button 
+                        onClick={handleSyncUsersAndApp}
+                        className="bg-white/10 text-white rounded-full p-1.5 flex items-center justify-center hover:bg-white/20"
+                        title="Actualizar y Sincronizar"
+                    >
+                        <span className={`material-symbols-outlined text-sm ${isUpdating ? 'animate-spin' : ''}`}>sync</span>
+                    </button>
+
                     <button onClick={handleLogout} className="text-white bg-white/10 p-2 rounded-full size-10 flex items-center justify-center"><span className="material-symbols-outlined text-xl">logout</span></button>
                 </div>
             </header>
         )}
 
+        {/* LOADING OVERLAY */}
         {(isUpdating || uploadStatus.isUploading) && (
             <div className="absolute inset-0 z-[60] flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm text-white p-6">
                 <div className="size-16 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4"></div>
@@ -461,6 +453,21 @@ const App: React.FC = () => {
             </div>
         )}
 
+        {/* WELCOME TUTORIAL OVERLAY */}
+        {showWelcomeTutorial && (
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-6 animate-fade-in" onClick={handleCloseTutorial}>
+                <div className="bg-white dark:bg-zinc-900 rounded-2xl p-6 max-w-sm text-center shadow-2xl" onClick={e => e.stopPropagation()}>
+                    <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4 text-azul-header">
+                        <span className="material-symbols-outlined text-4xl">waving_hand</span>
+                    </div>
+                    <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-2">¡Bienvenido a RCM Música!</h2>
+                    <p className="text-sm text-gray-500 mb-6">Esta aplicación te permite gestionar, buscar y reportar el uso de la fonoteca de la emisora. Revisa la sección <strong>Guía</strong> si necesitas ayuda.</p>
+                    <button onClick={handleCloseTutorial} className="w-full bg-azul-header text-white font-bold py-3 rounded-xl">Entendido</button>
+                </div>
+            </div>
+        )}
+
+        {/* MAIN CONTENT */}
         <div className="flex-1 overflow-hidden relative">
             {view === ViewState.LIST && (
                 <TrackList tracks={tracks} onSelectTrack={handleSelectTrack} onUploadTxt={handleUploadMultipleTxt} isAdmin={authMode === 'admin'} onSyncRoot={handleSyncMusicRoot} onExportRoot={handleExportMusicRoot} onClearRoot={handleClearMusicRoot} selectedTrackIds={new Set(selectedTracksList.map(t => t.id))} onToggleSelection={handleToggleSelection} />
@@ -474,18 +481,18 @@ const App: React.FC = () => {
 
             {view === ViewState.SETTINGS && authMode === 'admin' && <Settings tracks={tracks} users={users} onAddUser={handleAddUser} onEditUser={handleEditUser} onDeleteUser={handleDeleteUser} onExportUsers={handleExportUsers} onImportUsers={handleImportUsers} currentUser={currentUser} />}
             {view === ViewState.PRODUCTIONS && authMode === 'admin' && <Productions onAddTracks={(t) => updateTracks(prev => [...prev, ...t])} allTracks={tracks} />}
-            {view === ViewState.REPORTS && authMode === 'director' && <ReportsViewer users={users} onEdit={handleEditReport} />}
+            {view === ViewState.REPORTS && authMode === 'director' && <ReportsViewer users={users} onEdit={handleEditReport} currentUser={currentUser} />}
+            {view === ViewState.GUIDE && <Guide />}
             {view === ViewState.RESULTS && selectedTrack && <CreditResults originalTrack={selectedTrack} foundCredits={foundCredits} isLoading={isSearching} onApply={handleApplyCredits} onDiscard={handleDiscardResults} />}
         </div>
 
-        {/* EXPORT MODAL (EDIT PDF CONTENT / SHARE) */}
+        {/* EXPORT MODAL */}
         {showExportModal && (
             <div className="absolute inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4 animate-fade-in" onClick={() => setShowExportModal(false)}>
                 <div className="w-full max-w-lg bg-white dark:bg-zinc-900 h-[90vh] sm:h-[85vh] rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col relative overflow-hidden animate-slide-up" onClick={e => e.stopPropagation()}>
                     <div className="flex justify-between items-center p-4 border-b border-gray-100 dark:border-gray-800 shrink-0">
                         <div>
                             <h3 className="text-lg font-bold text-gray-800 dark:text-white flex items-center gap-2"><span className="material-symbols-outlined text-miel">edit_document</span> Editar y Exportar</h3>
-                            <p className="text-[10px] text-gray-500">Revise los datos antes de exportar.</p>
                         </div>
                         <button onClick={() => setShowExportModal(false)} className="text-gray-400"><span className="material-symbols-outlined">close</span></button>
                     </div>
@@ -524,8 +531,6 @@ const App: React.FC = () => {
                         <button onClick={handleDownloadTxt} className="bg-gray-600 text-white py-3 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-1 hover:brightness-95">
                             <span className="material-symbols-outlined text-lg">text_snippet</span> <span>TXT</span>
                         </button>
-
-                        {/* Only Director can generate PDF */}
                         {authMode === 'director' && (
                              <button onClick={handleDownloadReport} className="col-span-2 bg-azul-header text-white py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 hover:brightness-95 shadow-md">
                                 <span className="material-symbols-outlined text-lg">save_as</span> 
@@ -537,7 +542,7 @@ const App: React.FC = () => {
             </div>
         )}
 
-        {/* TRACK DETAIL, WISHLIST, ETC... (Existing code) */}
+        {/* WISHLIST MODAL */}
         {showWishlist && (
             <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in" onClick={() => setShowWishlist(false)}>
                 <div className="w-full max-w-sm bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl p-6" onClick={e => e.stopPropagation()}>
@@ -548,18 +553,20 @@ const App: React.FC = () => {
             </div>
         )}
 
+        {/* TRACK DETAIL MODAL */}
         {(view === ViewState.LIST || view === ViewState.SELECTION) && selectedTrack && (
             <TrackDetail track={selectedTrack} onClose={() => setSelectedTrack(null)} onSearchCredits={() => {}} authMode={authMode} onSaveEdit={handleManualEdit} />
         )}
         
+        {/* NAVIGATION BAR */}
         {view !== ViewState.RESULTS && (
             <nav className="bg-white dark:bg-background-dark border-t border-gray-200 dark:border-gray-800 h-20 px-2 flex items-center justify-between pb-2 z-20 shrink-0 overflow-x-auto">
                 <NavButton icon="folder_open" label="Explorador" active={view === ViewState.LIST} onClick={() => navigateTo(ViewState.LIST)} />
                 <NavButton icon="checklist" label="Selección" active={view === ViewState.SELECTION} onClick={() => navigateTo(ViewState.SELECTION)} />
                 
-                {/* Reports only for Directors */}
                 {authMode === 'director' && <NavButton icon="description" label="Reportes" active={view === ViewState.REPORTS} onClick={() => navigateTo(ViewState.REPORTS)} />}
-                
+                {authMode !== 'admin' && <NavButton icon="help" label="Guía" active={view === ViewState.GUIDE} onClick={() => navigateTo(ViewState.GUIDE)} />}
+
                 {authMode === 'admin' && <NavButton icon="playlist_add" label="Producción" active={view === ViewState.PRODUCTIONS} onClick={() => navigateTo(ViewState.PRODUCTIONS)} />}
                 {authMode === 'admin' && <NavButton icon="settings" label="Ajustes" active={view === ViewState.SETTINGS} onClick={() => navigateTo(ViewState.SETTINGS)} />}
             </nav>

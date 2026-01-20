@@ -115,7 +115,7 @@ export const updateReportStatus = async (id: string, statusPartial: { downloaded
     } catch (e) { console.error(e); }
 };
 
-export const loadReportsFromDB = async (): Promise<Report[]> => {
+export const loadReportsFromDB = async (usernameFilter?: string): Promise<Report[]> => {
     try {
         const db = await openDB();
         return new Promise((resolve, reject) => {
@@ -124,8 +124,12 @@ export const loadReportsFromDB = async (): Promise<Report[]> => {
             const request = store.getAll();
             
             request.onsuccess = () => {
+                let results = request.result || [];
+                // Filter if username is provided
+                if (usernameFilter) {
+                    results = results.filter((r: Report) => r.generatedBy === usernameFilter);
+                }
                 // Sort by date desc
-                const results = request.result || [];
                 results.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
                 resolve(results);
             };

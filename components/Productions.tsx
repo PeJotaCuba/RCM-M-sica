@@ -1,8 +1,8 @@
 
 import React, { useState } from 'react';
-import { Track, PROGRAMS_LIST } from '../types';
-import { parseTxtDatabase } from '../constants';
+import { Track, PROGRAMS_LIST, Report } from '../types';
 import { extractTextFromPDF } from '../services/pdfService';
+import { loadReportsFromDB } from '../services/db';
 import * as docx from 'docx';
 import * as XLSX from 'xlsx';
 
@@ -16,68 +16,80 @@ const Productions: React.FC<ProductionsProps> = ({ onAddTracks, allTracks = [] }
   const [entryProgram, setEntryProgram] = useState(PROGRAMS_LIST[0]);
   const [pdfProcessing, setPdfProcessing] = useState(false);
   
-  const [manualEntry, setManualEntry] = useState({
-      title: '', author: '', authorCountry: '', performer: '', performerCountry: '', genre: ''
-  });
-
-  // Suggestions state
-  const [suggestions, setSuggestions] = useState<Track[]>([]);
-
   // Report State
   const [reportStartDate, setReportStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [reportEndDate, setReportEndDate] = useState(new Date().toISOString().split('T')[0]);
   const [reportProgram, setReportProgram] = useState(PROGRAMS_LIST[0]);
-  const [reportScope, setReportScope] = useState<'general' | 'program'>('program');
+  const [reportScope, setReportScope] = useState<'program'>('program');
+  const [showGlobalStats, setShowGlobalStats] = useState(false);
+  const [globalReports, setGlobalReports] = useState<Report[]>([]);
 
-  // --- AUTOCOMPLETE LOGIC ---
-  const handleInputChange = (field: keyof typeof manualEntry, value: string) => {
-      setManualEntry(prev => ({ ...prev, [field]: value }));
-      
-      if (field === 'title' && value.length > 2) {
-          const lowerVal = value.toLowerCase();
-          const matches = allTracks.filter(t => t.metadata.title.toLowerCase().includes(lowerVal)).slice(0, 5);
-          setSuggestions(matches);
-      } else {
-          setSuggestions([]);
-      }
-  };
+  // PARSER SPECIFIC FOR REPORT PDF FORMAT
+  // Format:
+  // [1] Title
+  // Autor: Name (Country)
+  // Intérprete: Name (Country)
+  // Género: ...
+  const parseReportText = (text: string): Track[] => {
+    const lines = text.split('\n');
+    const tracks: Track[] = [];
+    let currentTrack: Partial<Track['metadata']> | null = null;
+    let currentId = 0;
 
-  const selectSuggestion = (track: Track) => {
-      setManualEntry({
-          title: track.metadata.title,
-          author: track.metadata.author,
-          authorCountry: track.metadata.authorCountry || '',
-          performer: track.metadata.performer,
-          performerCountry: track.metadata.performerCountry || '',
-          genre: track.metadata.genre || ''
-      });
-      setSuggestions([]);
-  };
+    const saveCurrent = () => {
+        if (currentTrack && currentTrack.title) {
+            tracks.push({
+                id: `imp-${Date.now()}-${currentId++}`,
+                filename: `${currentTrack.title}.mp3`,
+                path: 'Importado PDF',
+                isVerified: true,
+                metadata: {
+                    title: currentTrack.title,
+                    author: currentTrack.author || 'Desconocido',
+                    authorCountry: currentTrack.authorCountry || '',
+                    performer: currentTrack.performer || 'Desconocido',
+                    performerCountry: currentTrack.performerCountry || '',
+                    genre: currentTrack.genre || '',
+                    album: `Producción: ${entryProgram} (${entryDate})`,
+                    year: entryDate.split('-')[0]
+                }
+            } as Track);
+        }
+    };
 
-  const handleManualSubmit = () => {
-      if (!manualEntry.title) return alert("El título es obligatorio");
-      
-      const newTrack: Track = {
-          id: `man-${Date.now()}`,
-          filename: `${manualEntry.title}.mp3`,
-          path: `Producción: ${entryProgram}`,
-          size: '---',
-          isVerified: true,
-          metadata: {
-              title: manualEntry.title,
-              author: manualEntry.author,
-              authorCountry: manualEntry.authorCountry,
-              performer: manualEntry.performer,
-              performerCountry: manualEntry.performerCountry,
-              genre: manualEntry.genre,
-              album: `Producción: ${entryProgram} (${entryDate})`,
-              year: entryDate.split('-')[0]
-          }
-      };
-      
-      onAddTracks([newTrack]);
-      setManualEntry({ title: '', author: '', authorCountry: '', performer: '', performerCountry: '', genre: '' });
-      alert("Tema agregado correctamente.");
+    const extractNameCountry = (str: string) => {
+        // Regex: Matches "Name (Country)" taking the last parenthesis group
+        const match = str.match(/^(.*?)\s*\(([^)]+)\)$/);
+        if (match) return { name: match[1].trim(), country: match[2].trim() };
+        return { name: str.trim(), country: '' };
+    };
+
+    lines.forEach(line => {
+        const l = line.trim();
+        // Match [1] Title or [10] Title
+        const titleMatch = l.match(/^\[\d+\]\s+(.+)/);
+        
+        if (titleMatch) {
+            saveCurrent();
+            currentTrack = { title: titleMatch[1].trim() };
+        } else if (currentTrack) {
+            if (l.toLowerCase().startsWith('autor:')) {
+                const raw = l.substring(6).trim();
+                const { name, country } = extractNameCountry(raw);
+                currentTrack.author = name;
+                currentTrack.authorCountry = country;
+            } else if (l.toLowerCase().startsWith('intérprete:') || l.toLowerCase().startsWith('interprete:')) {
+                const raw = l.substring(11).trim();
+                const { name, country } = extractNameCountry(raw);
+                currentTrack.performer = name;
+                currentTrack.performerCountry = country;
+            } else if (l.toLowerCase().startsWith('género:') || l.toLowerCase().startsWith('genero:')) {
+                currentTrack.genre = l.substring(7).trim();
+            }
+        }
+    });
+    saveCurrent();
+    return tracks;
   };
 
   const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -87,20 +99,13 @@ const Productions: React.FC<ProductionsProps> = ({ onAddTracks, allTracks = [] }
       setPdfProcessing(true);
       try {
           const text = await extractTextFromPDF(file);
-          const tracks = parseTxtDatabase(text); // Reusamos el parser de texto ya que el PDF se convierte a string
+          const tracks = parseReportText(text); 
           
           if (tracks.length === 0) {
-              alert("No se detectaron pistas válidas en el PDF.");
+              alert("No se detectaron pistas válidas en el PDF. Asegúrese que sea un Reporte Oficial.");
           } else {
-              const tracksWithContext = tracks.map(t => ({
-                  ...t,
-                  metadata: {
-                      ...t.metadata,
-                      album: `Producción: ${entryProgram} (${entryDate})`
-                  }
-              }));
-              onAddTracks(tracksWithContext);
-              alert(`${tracks.length} pistas extraídas del PDF.`);
+              onAddTracks(tracks);
+              alert(`${tracks.length} pistas extraídas del Reporte PDF correctamente.`);
           }
       } catch (err) {
           alert("Error leyendo el PDF.");
@@ -110,7 +115,14 @@ const Productions: React.FC<ProductionsProps> = ({ onAddTracks, allTracks = [] }
       }
   };
 
-  // ... (Reports Logic remains similar) ...
+  // --- REPORTING LOGIC ---
+  const handleOpenGlobalStats = async () => {
+      // Load all reports from DB
+      const reports = await loadReportsFromDB();
+      setGlobalReports(reports);
+      setShowGlobalStats(true);
+  };
+
   const getFilteredTracks = () => {
       const start = new Date(reportStartDate);
       const end = new Date(reportEndDate);
@@ -152,7 +164,7 @@ const Productions: React.FC<ProductionsProps> = ({ onAddTracks, allTracks = [] }
       XLSX.writeFile(workbook, "Producciones.csv");
   };
 
-  const generateReport = async () => {
+  const generateDocxReport = async () => {
       const reportTracks = getFilteredTracks();
       if (reportTracks.length === 0) { alert("No hay datos."); return; }
 
@@ -224,7 +236,7 @@ const Productions: React.FC<ProductionsProps> = ({ onAddTracks, allTracks = [] }
             </div>
             <div className="grid grid-cols-2 gap-4 mb-6">
                 <div>
-                    <label className="block text-xs font-bold text-gray-500 mb-1">Fecha</label>
+                    <label className="block text-xs font-bold text-gray-500 mb-1">Fecha de Reporte</label>
                     <input type="date" value={entryDate} onChange={e => setEntryDate(e.target.value)} className="w-full p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 dark:text-white"/>
                 </div>
                 <div>
@@ -235,71 +247,55 @@ const Productions: React.FC<ProductionsProps> = ({ onAddTracks, allTracks = [] }
                 </div>
             </div>
 
-            {/* Manual Entry with Autocomplete */}
-            <div className="mb-6 bg-white dark:bg-zinc-800 p-4 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm relative">
-                <h3 className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
-                    <span className="material-symbols-outlined text-base">edit_note</span> Manual (Tema por tema)
-                </h3>
-                <div className="grid grid-cols-2 gap-3 mb-3">
-                    <div className="relative">
-                        <input placeholder="Título *" className="input-field" value={manualEntry.title} onChange={e => handleInputChange('title', e.target.value)} />
-                        {suggestions.length > 0 && (
-                            <div className="absolute top-full left-0 w-full bg-white dark:bg-zinc-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-20 max-h-40 overflow-y-auto">
-                                {suggestions.map(s => (
-                                    <div key={s.id} onClick={() => selectSuggestion(s)} className="p-2 text-xs hover:bg-gray-100 dark:hover:bg-white/10 cursor-pointer">
-                                        <strong>{s.metadata.title}</strong> - {s.metadata.performer}
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                    <input placeholder="Género" className="input-field" value={manualEntry.genre} onChange={e => handleInputChange('genre', e.target.value)} />
-                    <input placeholder="Autor" className="input-field" value={manualEntry.author} onChange={e => handleInputChange('author', e.target.value)} />
-                    <input placeholder="País Autor" className="input-field" value={manualEntry.authorCountry} onChange={e => handleInputChange('authorCountry', e.target.value)} />
-                    <input placeholder="Intérprete" className="input-field" value={manualEntry.performer} onChange={e => handleInputChange('performer', e.target.value)} />
-                    <input placeholder="País Intérprete" className="input-field" value={manualEntry.performerCountry} onChange={e => handleInputChange('performerCountry', e.target.value)} />
-                </div>
-                <button onClick={handleManualSubmit} className="w-full py-2 bg-azul-header text-white font-bold rounded-lg text-xs hover:bg-opacity-90 transition-colors">Agregar</button>
-            </div>
-
             {/* PDF Entry */}
             <div className="flex flex-col">
-                <label className="block text-xs font-bold text-gray-500 mb-2">Carga Masiva (PDF)</label>
-                <div className="bg-white dark:bg-zinc-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 shadow-sm flex items-center justify-center border-dashed border-2">
+                <label className="block text-xs font-bold text-gray-500 mb-2">Importar Reporte PDF (Oficial)</label>
+                <div className="bg-white dark:bg-zinc-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 shadow-sm flex items-center justify-center border-dashed border-2 hover:border-primary transition-colors">
                     {pdfProcessing ? (
                         <div className="flex flex-col items-center gap-2">
                             <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
-                            <span className="text-xs text-gray-500">Procesando PDF...</span>
+                            <span className="text-xs text-gray-500">Procesando Reporte...</span>
                         </div>
                     ) : (
-                        <label className="cursor-pointer flex flex-col items-center gap-2 group">
-                            <span className="material-symbols-outlined text-4xl text-gray-300 group-hover:text-primary transition-colors">picture_as_pdf</span>
-                            <span className="text-sm font-bold text-gray-500 group-hover:text-primary">Seleccionar Archivo PDF</span>
+                        <label className="cursor-pointer flex flex-col items-center gap-2 group w-full">
+                            <span className="material-symbols-outlined text-4xl text-gray-300 group-hover:text-primary transition-colors">upload_file</span>
+                            <span className="text-sm font-bold text-gray-500 group-hover:text-primary">Seleccionar PDF de Reporte</span>
                             <input type="file" accept=".pdf" onChange={handlePdfUpload} className="hidden" />
                         </label>
                     )}
                 </div>
+                <p className="text-[10px] text-gray-400 mt-2 text-center">Solo se admiten reportes PDF generados por la aplicación (PM-...).</p>
             </div>
         </div>
 
         <hr className="border-gray-200 dark:border-gray-700 mb-8"/>
 
-        {/* REPORTS */}
+        {/* REPORTS DASHBOARD */}
         <div>
-            <div className="flex items-center gap-3 mb-6 text-green-700 dark:text-green-500">
-                <span className="material-symbols-outlined text-3xl">summarize</span>
-                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Informes y Base de Datos</h2>
+            <div className="flex items-center justify-between mb-6">
+                 <div className="flex items-center gap-3 text-green-700 dark:text-green-500">
+                    <span className="material-symbols-outlined text-3xl">summarize</span>
+                    <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Estadísticas</h2>
+                 </div>
+                 <button 
+                    onClick={handleOpenGlobalStats}
+                    className="bg-miel text-white text-xs font-bold px-3 py-2 rounded-lg flex items-center gap-1 hover:bg-yellow-600 shadow-sm"
+                >
+                    <span className="material-symbols-outlined text-sm">leaderboard</span>
+                    Consultar Reportes Globales
+                </button>
             </div>
+
              <div className="bg-white dark:bg-zinc-800 p-6 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm space-y-4">
                  <div>
-                    <label className="block text-xs font-bold text-gray-500 mb-2 uppercase tracking-wider">Periodo</label>
+                    <label className="block text-xs font-bold text-gray-500 mb-2 uppercase tracking-wider">Filtrar Producción por Periodo</label>
                     <div className="grid grid-cols-2 gap-4">
                          <input type="date" value={reportStartDate} onChange={e => setReportStartDate(e.target.value)} className="w-full p-2 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-zinc-900"/>
                          <input type="date" value={reportEndDate} onChange={e => setReportEndDate(e.target.value)} className="w-full p-2 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-zinc-900"/>
                     </div>
                 </div>
                  <div className="flex gap-3 mt-4">
-                    <button onClick={generateReport} className="flex-1 bg-azul-header text-white py-3 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 hover:bg-opacity-90 transition-colors">
+                    <button onClick={generateDocxReport} className="flex-1 bg-azul-header text-white py-3 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 hover:bg-opacity-90 transition-colors">
                         <span className="material-symbols-outlined">description</span> Reporte (DOCX)
                     </button>
                     <button onClick={exportToCSV} className="flex-1 bg-green-600 text-white py-3 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 hover:bg-green-700 transition-colors">
@@ -309,10 +305,88 @@ const Productions: React.FC<ProductionsProps> = ({ onAddTracks, allTracks = [] }
             </div>
         </div>
 
-        <style>{`
-            .input-field { width: 100%; padding: 8px; border-radius: 8px; border: 1px solid #e5e7eb; font-size: 0.875rem; outline: none; }
-            .dark .input-field { background-color: #27272a; border-color: #3f3f46; color: white; }
-        `}</style>
+        {/* GLOBAL STATS MODAL */}
+        {showGlobalStats && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in" onClick={() => setShowGlobalStats(false)}>
+                <div className="bg-white dark:bg-zinc-900 w-full max-w-4xl h-[80vh] rounded-2xl p-6 flex flex-col" onClick={e => e.stopPropagation()}>
+                    <div className="flex justify-between items-center mb-6 border-b border-gray-200 dark:border-gray-700 pb-4">
+                        <h3 className="text-xl font-bold text-gray-900 dark:text-white">Tablero de Control de Reportes PDF</h3>
+                        <button onClick={() => setShowGlobalStats(false)} className="text-gray-400 hover:text-red-500"><span className="material-symbols-outlined">close</span></button>
+                    </div>
+                    
+                    <div className="flex-1 overflow-y-auto grid md:grid-cols-2 gap-6">
+                        {/* By Month */}
+                        <div className="bg-gray-50 dark:bg-white/5 p-4 rounded-xl">
+                            <h4 className="font-bold text-sm text-gray-700 dark:text-gray-300 mb-3 border-b border-gray-200 pb-2">Reportes por Mes</h4>
+                            <div className="space-y-2">
+                                {Object.entries(globalReports.reduce((acc, r) => {
+                                    const month = new Date(r.date).toLocaleString('es-ES', { month: 'long', year: 'numeric' });
+                                    if(!acc[month]) acc[month] = { count: 0, programs: new Set<string>() };
+                                    acc[month].count++;
+                                    acc[month].programs.add(r.program);
+                                    return acc;
+                                }, {} as Record<string, {count: number, programs: Set<string>}>)).map(([key, val]: [string, {count: number, programs: Set<string>}]) => (
+                                    <div key={key} className="flex justify-between text-xs">
+                                        <span className="capitalize font-medium">{key}</span>
+                                        <span className="text-gray-500">{val.count} reportes ({val.programs.size} programas)</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* By Director */}
+                        <div className="bg-gray-50 dark:bg-white/5 p-4 rounded-xl">
+                            <h4 className="font-bold text-sm text-gray-700 dark:text-gray-300 mb-3 border-b border-gray-200 pb-2">Reportes por Director</h4>
+                            <div className="space-y-2">
+                                {Object.entries(globalReports.reduce((acc, r) => {
+                                    if(!acc[r.generatedBy]) acc[r.generatedBy] = { count: 0, programs: new Set<string>() };
+                                    acc[r.generatedBy].count++;
+                                    acc[r.generatedBy].programs.add(r.program);
+                                    return acc;
+                                }, {} as Record<string, {count: number, programs: Set<string>}>)).map(([key, val]: [string, {count: number, programs: Set<string>}]) => (
+                                    <div key={key} className="flex justify-between text-xs">
+                                        <span className="font-bold text-blue-600">{key}</span>
+                                        <span className="text-gray-500">{val.count} reportes ({Array.from(val.programs).length} progs)</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                         {/* By Program */}
+                         <div className="bg-gray-50 dark:bg-white/5 p-4 rounded-xl md:col-span-2">
+                            <h4 className="font-bold text-sm text-gray-700 dark:text-gray-300 mb-3 border-b border-gray-200 pb-2">Detalle por Programa</h4>
+                            <div className="max-h-60 overflow-y-auto">
+                                <table className="w-full text-xs text-left">
+                                    <thead>
+                                        <tr className="text-gray-400">
+                                            <th className="pb-2">Programa</th>
+                                            <th className="pb-2 text-center">Cant. Reportes</th>
+                                            <th className="pb-2 text-right">Último Reporte</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {Object.entries(globalReports.reduce((acc, r) => {
+                                            if(!acc[r.program]) acc[r.program] = { count: 0, lastDate: r.date };
+                                            acc[r.program].count++;
+                                            if(new Date(r.date) > new Date(acc[r.program].lastDate)) acc[r.program].lastDate = r.date;
+                                            return acc;
+                                        }, {} as Record<string, {count: number, lastDate: string}>))
+                                        .sort((a: [string, {count: number, lastDate: string}], b: [string, {count: number, lastDate: string}]) => b[1].count - a[1].count)
+                                        .map(([key, val]: [string, {count: number, lastDate: string}]) => (
+                                            <tr key={key} className="border-b border-gray-100 dark:border-white/5">
+                                                <td className="py-2 font-medium">{key}</td>
+                                                <td className="py-2 text-center">{val.count}</td>
+                                                <td className="py-2 text-right">{new Date(val.lastDate).toLocaleDateString()}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        )}
     </div>
   );
 };

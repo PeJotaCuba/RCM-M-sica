@@ -51,7 +51,8 @@ export enum ViewState {
   RESULTS = 'RESULTS',
   SELECTION = 'SELECTION',
   PRODUCTIONS = 'PRODUCTIONS',
-  REPORTS = 'REPORTS'
+  REPORTS = 'REPORTS',
+  GUIDE = 'GUIDE'
 }
 
 export type FilterType = 'title' | 'author' | 'performer' | 'folder';
