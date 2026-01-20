@@ -1,7 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
 import { Track, PROGRAMS_LIST, Report } from '../types';
-import { extractTextFromPDF } from '../services/pdfService';
 import { loadReportsFromDB } from '../services/db';
 import * as docx from 'docx';
 import * as XLSX from 'xlsx';
@@ -14,7 +13,7 @@ interface ProductionsProps {
 const Productions: React.FC<ProductionsProps> = ({ onUpdateTracks, allTracks = [] }) => {
   const [entryDate, setEntryDate] = useState(new Date().toISOString().split('T')[0]);
   const [entryProgram, setEntryProgram] = useState(PROGRAMS_LIST[0]);
-  const [pdfProcessing, setPdfProcessing] = useState(false);
+  const [txtProcessing, setTxtProcessing] = useState(false);
   
   // Report Dashboard State
   const [reportStartDate, setReportStartDate] = useState(new Date().toISOString().split('T')[0]);
@@ -29,92 +28,98 @@ const Productions: React.FC<ProductionsProps> = ({ onUpdateTracks, allTracks = [
   const [batchFilterDate, setBatchFilterDate] = useState('');
   const [batchFilterProgram, setBatchFilterProgram] = useState('');
 
-  // PARSER SPECIFIC FOR REPORT PDF FORMAT
-  const parseReportText = (text: string, currentProgram: string, currentDate: string): Track[] => {
-    // IMPORTANT: Splitting by newline works because pdfService now joins with \n
-    const lines = text.split('\n');
+  // PARSER SPECIFIC FOR REPORT TXT FORMAT
+  const parseTxtReport = (text: string, defaultProgram: string, defaultDate: string): Track[] => {
+    const lines = text.split('\n').map(l => l.trim()).filter(l => l);
+    
+    let fileProgram = defaultProgram;
+    let fileDate = defaultDate;
+
+    // Scan headers first
+    for (let i = 0; i < Math.min(lines.length, 10); i++) {
+        const lower = lines[i].toLowerCase();
+        
+        // Parse "Fecha: 19/1/2026"
+        if (lower.startsWith('fecha:')) {
+            const rawDate = lines[i].substring(6).trim();
+            const parts = rawDate.split('/');
+            if (parts.length === 3) {
+                 // Normalize to YYYY-MM-DD
+                 // Assumes D/M/YYYY
+                 const d = parts[0].padStart(2, '0');
+                 const m = parts[1].padStart(2, '0');
+                 const y = parts[2];
+                 fileDate = `${y}-${m}-${d}`;
+            } else {
+                 fileDate = rawDate;
+            }
+        } 
+        // Parse "Formato: Buenos Días, Bayamo" or "Programa:"
+        else if (lower.startsWith('formato:') || lower.startsWith('programa:')) {
+            const prefixLen = lower.startsWith('formato:') ? 8 : 9;
+            fileProgram = lines[i].substring(prefixLen).trim();
+        }
+    }
+
     const tracks: Track[] = [];
-    let currentTrack: Partial<Track['metadata']> | null = null;
     let currentId = 0;
 
-    const saveCurrent = () => {
-        if (currentTrack && currentTrack.title) {
-            tracks.push({
-                id: `imp-${Date.now()}-${Math.random().toString(36).substr(2, 5)}-${currentId++}`,
-                filename: `${currentTrack.title}.mp3`,
-                path: 'Importado PDF',
-                isVerified: true,
-                metadata: {
-                    title: currentTrack.title,
-                    author: currentTrack.author || 'Desconocido',
-                    authorCountry: currentTrack.authorCountry || '',
-                    performer: currentTrack.performer || 'Desconocido',
-                    performerCountry: currentTrack.performerCountry || '',
-                    genre: currentTrack.genre || '',
-                    // The Album field acts as the Batch ID
-                    album: `Producción: ${currentProgram} (${currentDate})`,
-                    year: currentDate.split('-')[0]
-                }
-            } as Track);
-        }
-    };
-
     const extractNameCountry = (str: string) => {
-        // Regex to capture "Name (Country)"
-        // Handles cases with spacing: "Name   (Country)"
         const match = str.match(/^(.*?)\s*\(([^)]+)\)$/);
         if (match) return { name: match[1].trim(), country: match[2].trim() };
         return { name: str.trim(), country: '' };
     };
 
     lines.forEach(line => {
-        const l = line.trim();
-        // Regex to capture "[1] Title"
-        const titleMatch = l.match(/^\[\d+\]\s+(.+)/);
+        // Regex for format: "1 Title Autor: Name (Country) Intérprete: Name (Country) Género: Genre"
+        // Strict matching for the provided format
+        // Example: 1 Como en los sueños Autor: Alejandro... Intérprete: Alex... Género: Balada
+        const regex = /^\d+\s+(.+?)\s+Autor:\s+(.+?)\s+Intérprete:\s+(.+?)\s+Género:\s+(.+)$/i;
+        const match = line.match(regex);
         
-        if (titleMatch) {
-            saveCurrent();
-            currentTrack = { title: titleMatch[1].trim() };
-        } else if (currentTrack) {
-            if (l.toLowerCase().startsWith('autor:')) {
-                const raw = l.substring(6).trim();
-                const { name, country } = extractNameCountry(raw);
-                currentTrack.author = name;
-                currentTrack.authorCountry = country;
-            } else if (l.toLowerCase().startsWith('intérprete:') || l.toLowerCase().startsWith('interprete:')) {
-                // Length 11 matches "Intérprete:" (11 chars)
-                const raw = l.substring(11).trim();
-                const { name, country } = extractNameCountry(raw);
-                currentTrack.performer = name;
-                currentTrack.performerCountry = country;
-            } else if (l.toLowerCase().startsWith('género:') || l.toLowerCase().startsWith('genero:')) {
-                currentTrack.genre = l.substring(7).trim();
-            }
+        if (match) {
+            const [, title, authorRaw, performerRaw, genre] = match;
+            const authorData = extractNameCountry(authorRaw);
+            const performerData = extractNameCountry(performerRaw);
+
+            tracks.push({
+                id: `imp-${Date.now()}-${Math.random().toString(36).substr(2, 5)}-${currentId++}`,
+                filename: `${title.trim()}.mp3`,
+                path: 'Importado TXT',
+                isVerified: true,
+                metadata: {
+                    title: title.trim(),
+                    author: authorData.name,
+                    authorCountry: authorData.country,
+                    performer: performerData.name,
+                    performerCountry: performerData.country,
+                    genre: genre.trim(),
+                    album: `Producción: ${fileProgram} (${fileDate})`,
+                    year: fileDate.split('-')[0] || new Date().getFullYear().toString()
+                }
+            } as Track);
         }
     });
-    saveCurrent();
+
     return tracks;
   };
 
-  const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleTxtUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
       if (!e.target.files || e.target.files.length === 0) return;
       const files: File[] = Array.from(e.target.files);
       
-      setPdfProcessing(true);
+      setTxtProcessing(true);
       let totalTracks = 0;
       let filesProcessed = 0;
 
       const newTracksBuffer: Track[] = [];
 
       try {
-          // Process files sequentially or parallel (Promise.all is fine)
           await Promise.all(files.map(async (file) => {
               try {
-                  const text = await extractTextFromPDF(file);
-                  // We use the current state date/program for ALL files in this batch upload
-                  // Alternatively, one could try to parse date/program from PDF text if available.
-                  // For now, consistent with requirements, use the input fields.
-                  const fileTracks = parseReportText(text, entryProgram, entryDate);
+                  const text = await file.text();
+                  // Use file headers if available, otherwise fallback to UI input
+                  const fileTracks = parseTxtReport(text, entryProgram, entryDate);
                   if (fileTracks.length > 0) {
                       newTracksBuffer.push(...fileTracks);
                       totalTracks += fileTracks.length;
@@ -129,26 +134,24 @@ const Productions: React.FC<ProductionsProps> = ({ onUpdateTracks, allTracks = [
               onUpdateTracks(prev => [...prev, ...newTracksBuffer]);
               alert(`${totalTracks} pistas extraídas de ${filesProcessed} archivo(s).`);
           } else {
-              alert("No se detectaron pistas válidas. Asegúrese de usar Reportes Oficiales.");
+              alert("No se detectaron pistas válidas. Asegúrese de usar el formato TXT acordado:\n\n# Título Autor: Nombre (País) Intérprete: Nombre (País) Género: Estilo");
           }
       } catch (err) {
           alert("Error general leyendo archivos.");
       } finally {
-          setPdfProcessing(false);
+          setTxtProcessing(false);
           e.target.value = ''; 
       }
   };
 
   // --- BATCH MANAGEMENT ---
-  // Derive loaded batches from allTracks
   const loadedBatches = useMemo(() => {
       const batches: Record<string, { program: string, date: string, count: number, id: string }> = {};
       
       allTracks.forEach(t => {
-          if (t.path === 'Importado PDF' && t.metadata.album?.startsWith('Producción:')) {
+          if (t.path === 'Importado TXT' && t.metadata.album?.startsWith('Producción:')) {
               const batchId = t.metadata.album;
               if (!batches[batchId]) {
-                  // Parse "Producción: Program Name (YYYY-MM-DD)"
                   const match = batchId.match(/Producción: (.*) \(([\d-]+)\)$/);
                   const prog = match ? match[1] : 'Desconocido';
                   const date = match ? match[2] : 'Desconocido';
@@ -178,7 +181,6 @@ const Productions: React.FC<ProductionsProps> = ({ onUpdateTracks, allTracks = [
           onUpdateTracks(prev => prev.filter(t => t.metadata.album !== batchId));
       }
   };
-
 
   // --- REPORTING LOGIC ---
   const handleOpenGlobalStats = async () => {
@@ -298,47 +300,52 @@ const Productions: React.FC<ProductionsProps> = ({ onUpdateTracks, allTracks = [
                 <span className="material-symbols-outlined text-3xl">playlist_add</span>
                 <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Ingreso de Datos</h2>
             </div>
+            
+            {/* Disclaimer about file override */}
+            <div className="mb-4 bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg border border-blue-100 dark:border-blue-800 text-xs text-blue-800 dark:text-blue-200">
+                <p><strong>Nota:</strong> Si el archivo TXT contiene "Fecha" y "Formato", estos valores se usarán automáticamente para agrupar la producción.</p>
+            </div>
+
             <div className="grid grid-cols-2 gap-4 mb-6">
                 <div>
-                    <label className="block text-xs font-bold text-gray-500 mb-1">Fecha de Reporte</label>
+                    <label className="block text-xs font-bold text-gray-500 mb-1">Fecha (Por defecto)</label>
                     <input type="date" value={entryDate} onChange={e => setEntryDate(e.target.value)} className="w-full p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 dark:text-white"/>
                 </div>
                 <div>
-                    <label className="block text-xs font-bold text-gray-500 mb-1">Programa</label>
+                    <label className="block text-xs font-bold text-gray-500 mb-1">Programa (Por defecto)</label>
                     <select value={entryProgram} onChange={e => setEntryProgram(e.target.value)} className="w-full p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 dark:text-white appearance-none">
                         {PROGRAMS_LIST.map(p => <option key={p} value={p}>{p}</option>)}
                     </select>
                 </div>
             </div>
 
-            {/* PDF Entry */}
+            {/* TXT Entry */}
             <div className="flex flex-col gap-3">
                 <div>
-                    <label className="block text-xs font-bold text-gray-500 mb-2">Importar Reporte PDF (Oficial)</label>
+                    <label className="block text-xs font-bold text-gray-500 mb-2">Importar Reporte TXT (Oficial)</label>
                     <div className="bg-white dark:bg-zinc-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 shadow-sm flex items-center justify-center border-dashed border-2 hover:border-primary transition-colors">
-                        {pdfProcessing ? (
+                        {txtProcessing ? (
                             <div className="flex flex-col items-center gap-2">
                                 <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
-                                <span className="text-xs text-gray-500">Procesando Reporte...</span>
+                                <span className="text-xs text-gray-500">Procesando TXT...</span>
                             </div>
                         ) : (
                             <label className="cursor-pointer flex flex-col items-center gap-2 group w-full">
-                                <span className="material-symbols-outlined text-4xl text-gray-300 group-hover:text-primary transition-colors">upload_file</span>
-                                <span className="text-sm font-bold text-gray-500 group-hover:text-primary">Seleccionar PDF(s) de Reporte</span>
-                                {/* Added multiple */}
-                                <input type="file" accept=".pdf" multiple onChange={handlePdfUpload} className="hidden" />
+                                <span className="material-symbols-outlined text-4xl text-gray-300 group-hover:text-primary transition-colors">description</span>
+                                <span className="text-sm font-bold text-gray-500 group-hover:text-primary">Seleccionar Archivo(s) TXT</span>
+                                <input type="file" accept=".txt" multiple onChange={handleTxtUpload} className="hidden" />
                             </label>
                         )}
                     </div>
                 </div>
 
-                {/* PDFs Cargados Button */}
+                {/* Batches Button */}
                 <button 
                     onClick={() => setShowLoadedBatches(true)}
                     className="bg-gray-100 dark:bg-white/5 hover:bg-gray-200 text-gray-600 dark:text-gray-300 py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2 border border-gray-200 dark:border-white/10"
                 >
                     <span className="material-symbols-outlined">history</span>
-                    Ver PDFs Cargados ({loadedBatches.length})
+                    Ver Producciones Cargadas ({loadedBatches.length})
                 </button>
             </div>
         </div>
@@ -385,7 +392,7 @@ const Productions: React.FC<ProductionsProps> = ({ onUpdateTracks, allTracks = [
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in" onClick={() => setShowLoadedBatches(false)}>
                 <div className="bg-white dark:bg-zinc-900 w-full max-w-lg rounded-2xl p-6 shadow-2xl flex flex-col h-[70vh]" onClick={e => e.stopPropagation()}>
                     <div className="flex justify-between items-center mb-4 border-b border-gray-100 dark:border-white/10 pb-2">
-                         <h3 className="text-lg font-bold text-gray-800 dark:text-white">PDFs / Lotes Cargados</h3>
+                         <h3 className="text-lg font-bold text-gray-800 dark:text-white">Lotes / Producciones TXT</h3>
                          <button onClick={() => setShowLoadedBatches(false)} className="text-gray-400 hover:text-red-500"><span className="material-symbols-outlined">close</span></button>
                     </div>
 
