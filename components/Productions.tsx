@@ -28,24 +28,21 @@ const Productions: React.FC<ProductionsProps> = ({ onUpdateTracks, allTracks = [
   const [batchFilterDate, setBatchFilterDate] = useState('');
   const [batchFilterProgram, setBatchFilterProgram] = useState('');
 
-  // PARSER SPECIFIC FOR REPORT TXT FORMAT
+  // PARSER SPECIFIC FOR REPORT TXT FORMAT (MULTI-LINE)
   const parseTxtReport = (text: string, defaultProgram: string, defaultDate: string): Track[] => {
     const lines = text.split('\n').map(l => l.trim()).filter(l => l);
     
     let fileProgram = defaultProgram;
     let fileDate = defaultDate;
 
-    // Scan headers first
-    for (let i = 0; i < Math.min(lines.length, 10); i++) {
-        const lower = lines[i].toLowerCase();
-        
-        // Parse "Fecha: 19/1/2026"
+    // 1. Scan for Global Headers first
+    for (const line of lines) {
+        const lower = line.toLowerCase();
         if (lower.startsWith('fecha:')) {
-            const rawDate = lines[i].substring(6).trim();
+            const rawDate = line.substring(6).trim();
             const parts = rawDate.split('/');
             if (parts.length === 3) {
-                 // Normalize to YYYY-MM-DD
-                 // Assumes D/M/YYYY
+                 // Normalize to YYYY-MM-DD (Assumes DD/MM/YYYY input)
                  const d = parts[0].padStart(2, '0');
                  const m = parts[1].padStart(2, '0');
                  const y = parts[2];
@@ -54,10 +51,11 @@ const Productions: React.FC<ProductionsProps> = ({ onUpdateTracks, allTracks = [
                  fileDate = rawDate;
             }
         } 
-        // Parse "Formato: Buenos Días, Bayamo" or "Programa:"
-        else if (lower.startsWith('formato:') || lower.startsWith('programa:')) {
-            const prefixLen = lower.startsWith('formato:') ? 8 : 9;
-            fileProgram = lines[i].substring(prefixLen).trim();
+        else if (lower.startsWith('programa:')) {
+            fileProgram = line.substring(9).trim();
+        }
+        else if (lower.startsWith('formato:')) {
+             fileProgram = line.substring(8).trim();
         }
     }
 
@@ -70,36 +68,70 @@ const Productions: React.FC<ProductionsProps> = ({ onUpdateTracks, allTracks = [
         return { name: str.trim(), country: '' };
     };
 
-    lines.forEach(line => {
-        // Regex for format: "1 Title Autor: Name (Country) Intérprete: Name (Country) Género: Genre"
-        // Strict matching for the provided format
-        // Example: 1 Como en los sueños Autor: Alejandro... Intérprete: Alex... Género: Balada
-        const regex = /^\d+\s+(.+?)\s+Autor:\s+(.+?)\s+Intérprete:\s+(.+?)\s+Género:\s+(.+)$/i;
-        const match = line.match(regex);
-        
-        if (match) {
-            const [, title, authorRaw, performerRaw, genre] = match;
-            const authorData = extractNameCountry(authorRaw);
-            const performerData = extractNameCountry(performerRaw);
+    // 2. Scan for Tracks (Block based)
+    // [1] Title
+    // Autor: ...
+    // Intérprete: ...
+    // Género: ...
+
+    let currentTrack: { title: string, author: string, performer: string, genre: string } | null = null;
+
+    const saveCurrentTrack = () => {
+        if (currentTrack) {
+            const authorData = extractNameCountry(currentTrack.author || 'Desconocido');
+            const performerData = extractNameCountry(currentTrack.performer || 'Desconocido');
 
             tracks.push({
                 id: `imp-${Date.now()}-${Math.random().toString(36).substr(2, 5)}-${currentId++}`,
-                filename: `${title.trim()}.mp3`,
+                filename: `${currentTrack.title}.mp3`,
                 path: 'Importado TXT',
                 isVerified: true,
                 metadata: {
-                    title: title.trim(),
+                    title: currentTrack.title,
                     author: authorData.name,
                     authorCountry: authorData.country,
                     performer: performerData.name,
                     performerCountry: performerData.country,
-                    genre: genre.trim(),
+                    genre: currentTrack.genre || 'Desconocido',
                     album: `Producción: ${fileProgram} (${fileDate})`,
                     year: fileDate.split('-')[0] || new Date().getFullYear().toString()
                 }
             } as Track);
+            currentTrack = null;
         }
-    });
+    };
+
+    for (const line of lines) {
+        // Check for new track start: e.g., "[1] Como en los sueños"
+        const trackStartMatch = line.match(/^\[\d+\]\s+(.*)/);
+
+        if (trackStartMatch) {
+            saveCurrentTrack(); // Save previous if exists
+            currentTrack = {
+                title: trackStartMatch[1].trim(),
+                author: '',
+                performer: '',
+                genre: ''
+            };
+            continue;
+        }
+
+        if (currentTrack) {
+            const lower = line.toLowerCase();
+            if (lower.startsWith('autor:')) {
+                currentTrack.author = line.substring(6).trim();
+            } else if (lower.startsWith('intérprete:') || lower.startsWith('interprete:')) {
+                const parts = line.split(':');
+                if (parts.length > 1) currentTrack.performer = parts.slice(1).join(':').trim();
+            } else if (lower.startsWith('género:') || lower.startsWith('genero:')) {
+                const parts = line.split(':');
+                if (parts.length > 1) currentTrack.genre = parts.slice(1).join(':').trim();
+            }
+        }
+    }
+    
+    // Save the last one
+    saveCurrentTrack();
 
     return tracks;
   };
@@ -134,7 +166,7 @@ const Productions: React.FC<ProductionsProps> = ({ onUpdateTracks, allTracks = [
               onUpdateTracks(prev => [...prev, ...newTracksBuffer]);
               alert(`${totalTracks} pistas extraídas de ${filesProcessed} archivo(s).`);
           } else {
-              alert("No se detectaron pistas válidas. Asegúrese de usar el formato TXT acordado:\n\n# Título Autor: Nombre (País) Intérprete: Nombre (País) Género: Estilo");
+              alert("No se detectaron pistas válidas. Asegúrese de usar el formato del Reporte Oficial:\n\n[1] Título\nAutor: Nombre (País)\nIntérprete: Nombre (País)\nGénero: Estilo");
           }
       } catch (err) {
           alert("Error general leyendo archivos.");
@@ -303,7 +335,7 @@ const Productions: React.FC<ProductionsProps> = ({ onUpdateTracks, allTracks = [
             
             {/* Disclaimer about file override */}
             <div className="mb-4 bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg border border-blue-100 dark:border-blue-800 text-xs text-blue-800 dark:text-blue-200">
-                <p><strong>Nota:</strong> Si el archivo TXT contiene "Fecha" y "Formato", estos valores se usarán automáticamente para agrupar la producción.</p>
+                <p><strong>Nota:</strong> El sistema detectará automáticamente "Fecha" y "Programa" si están presentes en el archivo.</p>
             </div>
 
             <div className="grid grid-cols-2 gap-4 mb-6">
@@ -322,7 +354,7 @@ const Productions: React.FC<ProductionsProps> = ({ onUpdateTracks, allTracks = [
             {/* TXT Entry */}
             <div className="flex flex-col gap-3">
                 <div>
-                    <label className="block text-xs font-bold text-gray-500 mb-2">Importar Reporte TXT (Oficial)</label>
+                    <label className="block text-xs font-bold text-gray-500 mb-2">Importar Reporte TXT (Formato Oficial)</label>
                     <div className="bg-white dark:bg-zinc-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 shadow-sm flex items-center justify-center border-dashed border-2 hover:border-primary transition-colors">
                         {txtProcessing ? (
                             <div className="flex flex-col items-center gap-2">
