@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Track, ViewState, CreditInfo, AuthMode, User, PROGRAMS_LIST, Report, ExportItem, SavedSelection } from './types';
-import { parseTxtDatabase } from './constants';
+import { parseTxtDatabase, GENRES_LIST, COUNTRIES_LIST } from './constants';
 import TrackList from './components/TrackList';
 import TrackDetail from './components/TrackDetail';
 import CreditResults from './components/CreditResults';
@@ -17,6 +17,7 @@ import { generateReportPDF } from './services/pdfService';
 const AUTH_KEY = 'rcm_auth_session';
 const USERS_KEY = 'rcm_users_db';
 const SELECTION_KEY = 'rcm_current_selection';
+const SAVED_SELECTIONS_KEY = 'rcm_saved_selections'; // Key for persistence
 const CUSTOM_ROOTS_KEY = 'rcm_custom_roots';
 const USERS_DB_URL = 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/musuarios.json';
 
@@ -38,6 +39,8 @@ const App: React.FC = () => {
 
   const [selectedTrack, setSelectedTrack] = useState<Track | null>(null);
   const [selectedTracksList, setSelectedTracksList] = useState<Track[]>([]);
+  const [savedSelections, setSavedSelections] = useState<SavedSelection[]>([]);
+
   const [customRoots, setCustomRoots] = useState<string[]>([]);
   
   const [showWishlist, setShowWishlist] = useState(false);
@@ -63,8 +66,11 @@ const App: React.FC = () => {
         const savedRoots = localStorage.getItem(CUSTOM_ROOTS_KEY);
         if (savedRoots) setCustomRoots(JSON.parse(savedRoots));
 
-        const savedSelection = localStorage.getItem(SELECTION_KEY);
-        if (savedSelection) setSelectedTracksList(JSON.parse(savedSelection));
+        const currentSel = localStorage.getItem(SELECTION_KEY);
+        if (currentSel) setSelectedTracksList(JSON.parse(currentSel));
+
+        const savedSels = localStorage.getItem(SAVED_SELECTIONS_KEY);
+        if (savedSels) setSavedSelections(JSON.parse(savedSels));
 
         const savedUserStr = localStorage.getItem(AUTH_KEY);
         if (savedUserStr) {
@@ -82,12 +88,19 @@ const App: React.FC = () => {
     initApp();
   }, []);
 
-  // Persistence for selection
+  // Persistence for current selection
   useEffect(() => {
     if (authMode) {
       localStorage.setItem(SELECTION_KEY, JSON.stringify(selectedTracksList));
     }
   }, [selectedTracksList, authMode]);
+
+  // Persistence for saved selections
+  useEffect(() => {
+      if (authMode) {
+          localStorage.setItem(SAVED_SELECTIONS_KEY, JSON.stringify(savedSelections));
+      }
+  }, [savedSelections, authMode]);
 
   useEffect(() => {
     const handlePopState = (event: PopStateEvent) => {
@@ -187,12 +200,52 @@ const App: React.FC = () => {
       } 
   };
 
+  // --- SAVED SELECTIONS LOGIC ---
+
   const handleSaveSelectionPersist = () => {
-    if (selectedTracksList.length === 0) return alert("Nada que guardar.");
-    // Just force save to localStorage, although useEffect handles it.
-    localStorage.setItem(SELECTION_KEY, JSON.stringify(selectedTracksList));
-    alert(`Selección guardada con ${selectedTracksList.length} temas.`);
+    if (selectedTracksList.length === 0) return alert("No hay temas seleccionados para guardar.");
+    
+    // Check Limit
+    if (savedSelections.length >= 5) {
+        return alert("Has alcanzado el límite de 5 selecciones guardadas. Por favor, elimina alguna antes de guardar una nueva.");
+    }
+
+    const name = window.prompt("Nombre para esta selección:");
+    if (!name) return;
+
+    const newSelection: SavedSelection = {
+        id: `sel-${Date.now()}`,
+        name: name.trim(),
+        date: new Date().toISOString(),
+        tracks: [...selectedTracksList]
+    };
+
+    setSavedSelections(prev => [newSelection, ...prev]);
+    setSelectedTracksList([]); // Auto-clear as requested
+    localStorage.removeItem(SELECTION_KEY);
+    alert("Selección guardada y panel limpiado.");
   };
+
+  const handleLoadSavedSelection = (sel: SavedSelection) => {
+      if (selectedTracksList.length > 0) {
+          if (!window.confirm("Tienes temas seleccionados actualmente. ¿Deseas agregar la selección guardada a los actuales?")) return;
+      }
+      
+      // Merge unique tracks
+      const currentIds = new Set(selectedTracksList.map(t => t.id));
+      const toAdd = sel.tracks.filter(t => !currentIds.has(t.id));
+      
+      setSelectedTracksList(prev => [...prev, ...toAdd]);
+      alert(`${toAdd.length} temas cargados de "${sel.name}".`);
+  };
+
+  const handleDeleteSavedSelection = (id: string) => {
+      if (window.confirm("¿Eliminar esta selección guardada?")) {
+          setSavedSelections(prev => prev.filter(s => s.id !== id));
+      }
+  };
+
+  // --- END SAVED SELECTIONS LOGIC ---
 
   const handleProcessWishlist = () => {
       if (!wishlistText.trim()) return;
@@ -211,17 +264,34 @@ const App: React.FC = () => {
 
   const handleOpenExportModal = () => {
       setEditingReportId(null);
+      // Map selection to Export Items, handling default empty values
       const items: ExportItem[] = selectedTracksList.map(t => ({ 
-          id: t.id, title: t.metadata.title, author: t.metadata.author, authorCountry: t.metadata.authorCountry || '', 
-          performer: t.metadata.performer, performerCountry: t.metadata.performerCountry || '', 
-          genre: t.metadata.genre || '', source: 'db', path: t.path 
+          id: t.id, 
+          title: t.metadata.title, 
+          author: t.metadata.author, 
+          authorCountry: t.metadata.authorCountry || '', 
+          performer: t.metadata.performer, 
+          performerCountry: t.metadata.performerCountry || '', 
+          genre: t.metadata.genre || '', 
+          source: 'db', 
+          path: t.path 
       }));
-      setExportItems(items); setShowExportModal(true);
+      setExportItems(items); 
+      setShowExportModal(true);
+  };
+
+  const handleUpdateExportItem = (index: number, field: keyof ExportItem, value: string) => {
+      const newItems = [...exportItems];
+      newItems[index] = { ...newItems[index], [field]: value };
+      setExportItems(newItems);
   };
 
   const handleShareWhatsApp = () => {
       let message = `*CRÉDITOS RCM*\n*Programa:* ${programName}\n\n`;
-      exportItems.forEach(item => { message += `🎵 *${item.title}*\n👤 ${item.performer}\n📂 _${item.path || 'Manual'}_\n\n`; });
+      // Use edited exportItems for the message
+      exportItems.forEach(item => { 
+          message += `🎵 *${item.title}* - ${item.performer}\n📂 _${item.path || 'Manual'}_\n\n`; 
+      });
       window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, '_blank');
   };
 
@@ -231,7 +301,7 @@ const App: React.FC = () => {
       const dateStr = new Date().toISOString().split('T')[0];
       const fileName = `PM-${programName}-${dateStr}.pdf`;
       await saveReportToDB({ id: editingReportId || `rep-${Date.now()}`, date: new Date().toISOString(), program: programName, generatedBy: currentUser.username, fileName, pdfBlob, items: exportItems, status: { downloaded: false, sent: false } });
-      alert("Reporte PDF generado y guardado.");
+      alert("Reporte PDF generado y guardado en Reportes.");
       setShowExportModal(false);
   };
 
@@ -261,6 +331,14 @@ const App: React.FC = () => {
   return (
     <div className="max-w-md mx-auto h-[100dvh] bg-gray-100 shadow-2xl overflow-hidden relative border-x border-gray-200 flex flex-col font-display">
         
+        {/* Datalists for global usage in inputs */}
+        <datalist id="genre-options">
+            {GENRES_LIST.map(g => <option key={g} value={g} />)}
+        </datalist>
+        <datalist id="country-options">
+            {COUNTRIES_LIST.map(c => <option key={c} value={c} />)}
+        </datalist>
+
         <header className="bg-azul-header text-white px-4 py-3 flex items-center justify-between shadow-md relative z-20 shrink-0">
             <button className="flex items-center gap-3" onClick={() => navigateTo(ViewState.LIST)}>
                 <div className="size-10 flex items-center justify-center bg-white/10 rounded-full border-2 border-white/20">
@@ -308,6 +386,26 @@ const App: React.FC = () => {
                              <button onClick={handleClearSelection} className="text-[9px] font-bold uppercase bg-red-50 text-red-500 px-3 py-1.5 rounded-lg flex items-center gap-1">Limpiar</button>
                          </div>
                     </div>
+                    
+                    {/* SAVED SELECTIONS AREA */}
+                    {savedSelections.length > 0 && (
+                        <div className="bg-white border-b border-gray-100 p-2">
+                            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-2 mb-2">Guardadas ({savedSelections.length}/5)</p>
+                            <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1 px-2">
+                                {savedSelections.map(sel => (
+                                    <div key={sel.id} className="flex-none bg-gray-50 border border-gray-200 rounded-lg p-2 min-w-[120px] flex flex-col gap-1">
+                                        <div className="flex justify-between items-start">
+                                            <span className="font-bold text-xs text-gray-800 truncate w-20">{sel.name}</span>
+                                            <button onClick={() => handleDeleteSavedSelection(sel.id)} className="text-gray-400 hover:text-red-500"><span className="material-symbols-outlined text-xs">close</span></button>
+                                        </div>
+                                        <div className="text-[9px] text-gray-500">{sel.tracks.length} temas</div>
+                                        <button onClick={() => handleLoadSavedSelection(sel)} className="text-[9px] bg-white border border-gray-200 rounded py-1 font-bold text-azul-header hover:bg-azul-header hover:text-white transition-colors">Cargar</button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
                     <div className="flex-1 overflow-y-auto">
                         <TrackList 
                             tracks={selectedTracksList} onSelectTrack={handleSelectTrack} onUploadTxt={() => {}} isAdmin={false} 
@@ -321,7 +419,7 @@ const App: React.FC = () => {
                              <span className="material-symbols-outlined text-sm">save</span> Guardar Selección
                          </button>
                          <button onClick={handleOpenExportModal} className="w-full bg-azul-header text-white py-3.5 rounded-xl font-bold text-sm shadow-md flex items-center justify-center gap-2">
-                            <span className="material-symbols-outlined">description</span> Generar Reporte ({selectedTracksList.length})
+                            <span className="material-symbols-outlined">ios_share</span> Exportar / Compartir ({selectedTracksList.length})
                          </button>
                     </div>
                 </div>
@@ -356,13 +454,70 @@ const App: React.FC = () => {
 
         {showExportModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setShowExportModal(false)}>
-                <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
-                    <div className="flex justify-between items-center p-4 border-b"><h3 className="font-bold">Exportar Reporte</h3><button onClick={() => setShowExportModal(false)}><span className="material-symbols-outlined">close</span></button></div>
-                    <div className="p-4 bg-gray-50"><select value={programName} onChange={e => setProgramName(e.target.value)} className="w-full p-2 border rounded bg-white text-sm">{PROGRAMS_LIST.map(p => <option key={p} value={p}>{p}</option>)}</select></div>
-                    <div className="flex-1 overflow-y-auto p-4 space-y-2">
-                        {exportItems.map(item => (<div key={item.id} className="p-2 border rounded-xl text-[10px] bg-white"><p className="font-bold">{item.title}</p><p className="text-gray-500">{item.performer}</p></div>))}
+                <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl flex flex-col h-[85vh]" onClick={e => e.stopPropagation()}>
+                    
+                    {/* Header */}
+                    <div className="flex justify-between items-center p-4 border-b shrink-0">
+                        <div>
+                            <h3 className="font-bold text-gray-900">Exportar Selección</h3>
+                            <p className="text-xs text-gray-400">Edita los detalles antes de compartir</p>
+                        </div>
+                        <button onClick={() => setShowExportModal(false)}><span className="material-symbols-outlined text-gray-400">close</span></button>
                     </div>
-                    <div className="p-4 grid grid-cols-2 gap-3 bg-gray-50"><button onClick={handleShareWhatsApp} className="bg-[#25D366] text-white py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2">WhatsApp</button><button onClick={handleDownloadReport} className="bg-primary text-white py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2">PDF</button></div>
+
+                    {/* Program Selector */}
+                    <div className="p-4 bg-gray-50 border-b shrink-0">
+                        <label className="text-xs font-bold text-gray-500 block mb-1">Programa</label>
+                        <select value={programName} onChange={e => setProgramName(e.target.value)} className="w-full p-2 border rounded bg-white text-sm outline-none">
+                            {PROGRAMS_LIST.map(p => <option key={p} value={p}>{p}</option>)}
+                        </select>
+                    </div>
+
+                    {/* Editable Items List */}
+                    <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                        {exportItems.map((item, idx) => (
+                            <div key={item.id} className="p-4 border rounded-xl bg-white shadow-sm">
+                                <div className="mb-2">
+                                    <label className="text-[10px] font-bold text-gray-400 uppercase">Título</label>
+                                    <input className="w-full p-1 border-b text-sm font-bold outline-none focus:border-primary" value={item.title} onChange={e => handleUpdateExportItem(idx, 'title', e.target.value)} />
+                                </div>
+                                <div className="grid grid-cols-2 gap-3 mb-2">
+                                    <div>
+                                        <label className="text-[10px] font-bold text-gray-400 uppercase">Autor</label>
+                                        <input className="w-full p-1 border-b text-xs outline-none focus:border-primary" value={item.author} onChange={e => handleUpdateExportItem(idx, 'author', e.target.value)} />
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] font-bold text-gray-400 uppercase">País Autor</label>
+                                        <input className="w-full p-1 border-b text-xs outline-none focus:border-primary" list="country-options" value={item.authorCountry} onChange={e => handleUpdateExportItem(idx, 'authorCountry', e.target.value)} />
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-2 gap-3 mb-2">
+                                    <div>
+                                        <label className="text-[10px] font-bold text-gray-400 uppercase">Intérprete</label>
+                                        <input className="w-full p-1 border-b text-xs outline-none focus:border-primary" value={item.performer} onChange={e => handleUpdateExportItem(idx, 'performer', e.target.value)} />
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] font-bold text-gray-400 uppercase">País Intérprete</label>
+                                        <input className="w-full p-1 border-b text-xs outline-none focus:border-primary" list="country-options" value={item.performerCountry} onChange={e => handleUpdateExportItem(idx, 'performerCountry', e.target.value)} />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-bold text-gray-400 uppercase">Género</label>
+                                    <input className="w-full p-1 border-b text-xs outline-none focus:border-primary" list="genre-options" value={item.genre} onChange={e => handleUpdateExportItem(idx, 'genre', e.target.value)} />
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Footer Actions */}
+                    <div className="p-4 grid grid-cols-2 gap-3 bg-gray-50 border-t shrink-0">
+                        <button onClick={handleShareWhatsApp} className="bg-[#25D366] text-white py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 shadow-sm">
+                            <i className="material-symbols-outlined text-lg">chat</i> WhatsApp
+                        </button>
+                        <button onClick={handleDownloadReport} className="bg-primary text-white py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 shadow-sm">
+                            <i className="material-symbols-outlined text-lg">picture_as_pdf</i> Generar PDF
+                        </button>
+                    </div>
                 </div>
             </div>
         )}

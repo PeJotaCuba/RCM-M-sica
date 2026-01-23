@@ -32,7 +32,12 @@ export interface ExportItem {
   path: string;
 }
 
-export type SavedSelection = Track[];
+export interface SavedSelection {
+    id: string;
+    name: string;
+    date: string;
+    tracks: Track[];
+}
 
 export interface User {
   username: string;
