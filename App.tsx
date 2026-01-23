@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Track, ViewState, CreditInfo, AuthMode, User, PROGRAMS_LIST, Report } from './types';
+import { Track, ViewState, CreditInfo, AuthMode, User, PROGRAMS_LIST, Report, ExportItem, SavedSelection } from './types';
 import { parseTxtDatabase } from './constants';
 import TrackList from './components/TrackList';
 import TrackDetail from './components/TrackDetail';
@@ -14,10 +14,11 @@ import { fetchCreditsFromGemini } from './services/geminiService';
 import { loadTracksFromDB, saveTracksToDB, saveReportToDB } from './services/db'; 
 import { generateReportPDF } from './services/pdfService';
 import * as XLSX from 'xlsx';
-import * as docx from 'docx';
 
 const AUTH_KEY = 'rcm_auth_session';
 const USERS_KEY = 'rcm_users_db';
+const SELECTION_KEY = 'rcm_current_selection';
+const CUSTOM_ROOTS_KEY = 'rcm_custom_roots';
 
 const DB_URLS: Record<string, string> = {
     'Música 1': 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/mdatos1.json',
@@ -39,18 +40,6 @@ const DEFAULT_ADMIN: User = {
     uniqueId: 'RCM-ADMIN-X9Y8Z7A6B5C4'
 };
 
-interface ExportItem {
-    id: string;
-    title: string;
-    author: string;
-    authorCountry: string;
-    performer: string;
-    performerCountry: string;
-    genre: string;
-    source: 'db' | 'manual';
-    path?: string;
-}
-
 const App: React.FC = () => {
   const [tracks, setTracks] = useState<Track[]>([]);
   const [view, setView] = useState<ViewState>(ViewState.LOGIN);
@@ -60,6 +49,7 @@ const App: React.FC = () => {
 
   const [selectedTrack, setSelectedTrack] = useState<Track | null>(null);
   const [selectedTracksList, setSelectedTracksList] = useState<Track[]>([]);
+  const [customRoots, setCustomRoots] = useState<string[]>([]);
 
   const [showWishlist, setShowWishlist] = useState(false);
   const [missingQueries, setMissingQueries] = useState<string[]>([]);
@@ -71,39 +61,60 @@ const App: React.FC = () => {
   const [programName, setProgramName] = useState(PROGRAMS_LIST[0]);
   const [editingReportId, setEditingReportId] = useState<string | null>(null); 
 
-  const [foundCredits, setFoundCredits] = useState<CreditInfo | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Tutorial State
-  const [showWelcomeTutorial, setShowWelcomeTutorial] = useState(false);
-
-  // Upload State
-  const [uploadStatus, setUploadStatus] = useState<{
-    isUploading: boolean;
-    currentFile: number;
-    totalFiles: number;
-    currentFileName: string;
-  }>({ isUploading: false, currentFile: 0, totalFiles: 0, currentFileName: '' });
-
-  const generateUniqueId = (name: string) => {
-      const cleanName = name ? name.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().substring(0, 10) : 'USR';
-      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-      let random = '';
-      for (let i = 0; i < 16; i++) { random += chars.charAt(Math.floor(Math.random() * chars.length)); }
-      return `RCM-${cleanName}-${random}`;
-  };
-
   useEffect(() => {
-    if (view === ViewState.LOGIN) return;
-    const handlePopState = (event: PopStateEvent) => {
-        if (selectedTrack) { setSelectedTrack(null); return; }
-        if (showWishlist) { setShowWishlist(false); return; }
-        if (showExportModal) { setShowExportModal(false); return; }
-        if (view !== ViewState.LIST) { setView(ViewState.LIST); return; }
+    const initApp = async () => {
+        try { const dbTracks = await loadTracksFromDB(); if (dbTracks.length > 0) setTracks(dbTracks); } catch (e) { console.error(e); }
+        
+        // Load Users
+        const localUsers = localStorage.getItem(USERS_KEY);
+        let currentUsersList = [DEFAULT_ADMIN];
+        if (localUsers) { try { const parsed = JSON.parse(localUsers); if (Array.isArray(parsed) && parsed.length > 0) currentUsersList = parsed; } catch { } }
+        setUsers(currentUsersList);
+
+        // Load Custom Roots
+        const savedRoots = localStorage.getItem(CUSTOM_ROOTS_KEY);
+        if (savedRoots) setCustomRoots(JSON.parse(savedRoots));
+
+        // Load Persistent Selection
+        const savedSelection = localStorage.getItem(SELECTION_KEY);
+        if (savedSelection) setSelectedTracksList(JSON.parse(savedSelection));
+
+        // Auth
+        const savedUserStr = localStorage.getItem(AUTH_KEY);
+        if (savedUserStr) {
+            try {
+                const savedUser = JSON.parse(savedUserStr);
+                const validUser = currentUsersList.find(u => u.username === savedUser.username && u.password === savedUser.password);
+                if (validUser) {
+                    setCurrentUser(validUser); setAuthMode(validUser.role); setView(ViewState.LIST);
+                } else { 
+                    localStorage.removeItem(AUTH_KEY); 
+                }
+            } catch { localStorage.removeItem(AUTH_KEY); }
+        }
     };
-    window.history.pushState({ appLevel: true }, '');
+    initApp();
+  }, []);
+
+  // Save selection to storage whenever it changes
+  useEffect(() => {
+    if (authMode) {
+      localStorage.setItem(SELECTION_KEY, JSON.stringify(selectedTracksList));
+    }
+  }, [selectedTracksList, authMode]);
+
+  // Back Button Logic for internal navigation
+  useEffect(() => {
+    const handlePopState = (event: PopStateEvent) => {
+        if (selectedTrack) { setSelectedTrack(null); event.preventDefault(); return; }
+        if (showWishlist) { setShowWishlist(false); event.preventDefault(); return; }
+        if (showExportModal) { setShowExportModal(false); event.preventDefault(); return; }
+        if (view !== ViewState.LIST) { setView(ViewState.LIST); event.preventDefault(); return; }
+    };
     window.addEventListener('popstate', handlePopState);
     return () => { window.removeEventListener('popstate', handlePopState); };
   }, [selectedTrack, view, showWishlist, showExportModal]);
@@ -119,201 +130,89 @@ const App: React.FC = () => {
   const updateUsers = (newUsers: User[]) => {
       setUsers(newUsers);
       localStorage.setItem(USERS_KEY, JSON.stringify(newUsers));
-      if (currentUser) {
-          const stillExists = newUsers.find(u => u.username === currentUser.username);
-          if (!stillExists) { handleLogout(); } 
-          else if (stillExists.password !== currentUser.password) { handleLogout(); alert("Contraseña cambiada."); } 
-          else { setCurrentUser(stillExists); localStorage.setItem(AUTH_KEY, JSON.stringify(stillExists)); }
-      }
-  };
-
-  useEffect(() => {
-    const initApp = async () => {
-        try { const dbTracks = await loadTracksFromDB(); if (dbTracks.length > 0) setTracks(dbTracks); } catch (e) { console.error(e); }
-        const localUsers = localStorage.getItem(USERS_KEY);
-        let currentUsersList = [DEFAULT_ADMIN];
-        if (localUsers) { try { const parsed = JSON.parse(localUsers); if (Array.isArray(parsed) && parsed.length > 0) currentUsersList = parsed; } catch { } }
-        setUsers(currentUsersList);
-        const savedUserStr = localStorage.getItem(AUTH_KEY);
-        if (savedUserStr) {
-            try {
-                const savedUser = JSON.parse(savedUserStr);
-                const validUser = currentUsersList.find(u => u.username === savedUser.username && u.password === savedUser.password);
-                if (validUser) {
-                    if (!validUser.uniqueId) { validUser.uniqueId = generateUniqueId(validUser.fullName); updateUsers(currentUsersList.map(u => u.username === validUser.username ? validUser : u)); }
-                    setCurrentUser(validUser); setAuthMode(validUser.role); setView(ViewState.LIST);
-                } else { 
-                    localStorage.removeItem(AUTH_KEY); 
-                }
-            } catch { localStorage.removeItem(AUTH_KEY); }
-        }
-    };
-    initApp();
-  }, []);
-
-  // Check for first-time tutorial
-  useEffect(() => {
-      if (view !== ViewState.LOGIN && view !== ViewState.GUIDE) {
-          const hasSeenIntro = localStorage.getItem('rcm_tut_welcome');
-          if (!hasSeenIntro) {
-              setShowWelcomeTutorial(true);
-          }
-      }
-  }, [view]);
-
-  const handleCloseTutorial = () => {
-      localStorage.setItem('rcm_tut_welcome', 'true');
-      setShowWelcomeTutorial(false);
   };
 
   const handleLoginSuccess = (user: User) => {
-    const existingUser = users.find(u => u.username === user.username);
-    if (existingUser && !user.uniqueId) { user.uniqueId = generateUniqueId(user.fullName); updateUsers(users.map(u => u.username === user.username ? user : u)); }
     setCurrentUser(user); setAuthMode(user.role); setView(ViewState.LIST); localStorage.setItem(AUTH_KEY, JSON.stringify(user));
   };
 
   const handleLogout = () => {
-      localStorage.removeItem(AUTH_KEY); setAuthMode(null); setCurrentUser(null); setView(ViewState.LOGIN); setSelectedTrack(null); setSelectedTracksList([]);
-  };
-
-  const handleAddUser = (u: User) => updateUsers([...users, u]);
-  const handleEditUser = (updatedUser: User, originalUsername?: string) => {
-      const targetUsername = originalUsername || updatedUser.username;
-      updateUsers(users.map(u => u.username === targetUsername ? updatedUser : u));
-  };
-  const handleDeleteUser = (username: string) => { if (users.length <= 1) return alert("Error"); updateUsers(users.filter(u => u.username !== username)); };
-  
-  const handleImportUsers = (newUsers: User[]) => {
-      const existingUsernames = new Set(users.map(u => u.username.toLowerCase()));
-      const validNewUsers = newUsers.filter(u => !existingUsernames.has(u.username.toLowerCase()));
-      if (validNewUsers.length === 0) {
-          alert("No se añadieron usuarios (posibles duplicados o archivo vacío).");
-          return;
-      }
-      const processedUsers = validNewUsers.map(u => ({ ...u, uniqueId: u.uniqueId || generateUniqueId(u.fullName) }));
-      updateUsers([...users, ...processedUsers]);
-      alert(`${processedUsers.length} usuarios importados correctamente.`);
+      localStorage.removeItem(AUTH_KEY); setAuthMode(null); setCurrentUser(null); setView(ViewState.LOGIN); setSelectedTrack(null);
   };
 
   const handleSyncUsersAndApp = async () => {
       setIsUpdating(true);
       try {
-          // 1. Sync Users
           const r = await fetch(USERS_DB_URL);
           const j = await r.json();
           updateUsers(j);
-          
-          alert("Base de datos actualizada correctamente. La aplicación se reiniciará.");
+          alert("Sincronización completada.");
           window.location.reload(); 
       } catch(e) {
-          alert("Error al conectar con el servidor. Verifique su conexión.");
+          alert("Error al sincronizar.");
       } finally {
           setIsUpdating(false);
       }
   };
 
-  const handleSyncMusicRoot = async (rootName: string) => { const url = DB_URLS[rootName]; if(!url) return; if(!confirm("¿Desea sincronizar esta carpeta?")) return; setIsUpdating(true); try { const r = await fetch(url); const n = await r.json(); const k = tracks.filter(t => !t.path.startsWith(rootName)); await updateTracks([...k, ...n]); alert("Sincronización completada con éxito."); } catch(e){ alert("Error de conexión."); } finally { setIsUpdating(false); } };
-  const handleClearMusicRoot = async (rootName: string) => { if(!confirm("¿Eliminar datos locales?")) return; const k = tracks.filter(t => !t.path.startsWith(rootName)); await updateTracks(k); alert("Datos eliminados."); };
-  const handleExportMusicRoot = (rootName: string) => { if(authMode!=='admin') return; const k = tracks.filter(t => t.path.startsWith(rootName)); if(k.length===0) return; const a = document.createElement('a'); a.href = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(k)); a.download = "data.json"; a.click(); };
-  const handleExportUsers = () => { if(authMode!=='admin') return; const a = document.createElement('a'); a.href = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(users)); a.download = "musuarios.json"; a.click(); };
+  const handleAddCustomRoot = (name: string) => {
+      const newRoots = [...customRoots, name];
+      setCustomRoots(newRoots);
+      localStorage.setItem(CUSTOM_ROOTS_KEY, JSON.stringify(newRoots));
+  };
 
-  const readFileAsText = (file: File): Promise<string> => {
-      return new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = (e) => typeof e.target?.result === 'string' ? resolve(e.target.result) : reject("Err");
-          reader.onerror = (e) => reject(e);
-          reader.readAsText(file);
-      });
+  const handleRenameRoot = (oldName: string, newName: string) => {
+      const newRoots = customRoots.map(r => r === oldName ? newName : r);
+      setCustomRoots(newRoots);
+      localStorage.setItem(CUSTOM_ROOTS_KEY, JSON.stringify(newRoots));
+      // Update tracks path
+      setTracks(prev => prev.map(t => t.path.startsWith(oldName) ? { ...t, path: t.path.replace(oldName, newName) } : t));
   };
 
   const handleUploadMultipleTxt = async (files: FileList, targetRoot: string) => {
-      if (authMode !== 'admin') return alert("Solo Admin.");
       if (!files || files.length === 0) return;
       const filesArray = Array.from(files);
-      setUploadStatus({ isUploading: true, totalFiles: filesArray.length, currentFile: 0, currentFileName: '' });
-
+      setIsUpdating(true);
       let parsedTracks: Track[] = [];
-
       try {
           for (let i = 0; i < filesArray.length; i++) {
-              setUploadStatus(prev => ({ ...prev, currentFile: i + 1, currentFileName: filesArray[i].name }));
-              await new Promise(r => setTimeout(r, 20)); 
-              try {
-                  const text = await readFileAsText(filesArray[i]);
-                  const t = parseTxtDatabase(text, targetRoot);
-                  parsedTracks = [...parsedTracks, ...t];
-              } catch (err) { console.error(err); }
+              const text = await filesArray[i].text();
+              const t = parseTxtDatabase(text, targetRoot);
+              parsedTracks = [...parsedTracks, ...t];
           }
-
-          if (parsedTracks.length > 0) {
-              setUploadStatus(prev => ({ ...prev, currentFileName: 'Integrando datos...' }));
-              await updateTracks(currentTracks => {
-                  const updatedList = [...currentTracks];
-                  let addedCount = 0;
-                  let updatedCount = 0;
-                  parsedTracks.forEach(newT => {
-                      const existingIndex = updatedList.findIndex(ex => ex.path === newT.path && ex.filename === newT.filename);
-                      if (existingIndex > -1) {
-                          const existing = updatedList[existingIndex];
-                          const merged = { ...existing };
-                          let changed = false;
-                          const fields = ['title', 'author', 'performer', 'genre', 'album', 'year'] as const;
-                          fields.forEach(f => {
-                              const existingVal = existing.metadata[f];
-                              const newVal = newT.metadata[f];
-                              if ((!existingVal || existingVal === 'Desconocido' || existingVal === '---') && newVal && newVal !== 'Desconocido') {
-                                  // @ts-ignore
-                                  merged.metadata[f] = newVal;
-                                  changed = true;
-                              }
-                          });
-                          if (changed) { updatedList[existingIndex] = merged; updatedCount++; }
-                      } else { updatedList.push(newT); addedCount++; }
-                  });
-                  alert(`Proceso finalizado.\nNuevos: ${addedCount}\nActualizados: ${updatedCount}`);
-                  return updatedList;
-              });
-          } else { alert("Sin datos válidos."); }
-      } catch (e) { console.error(e); alert("Error."); } finally { setUploadStatus(prev => ({ ...prev, isUploading: false })); }
+          await updateTracks(prev => [...prev, ...parsedTracks]);
+          alert(`${parsedTracks.length} pistas integradas.`);
+      } catch (e) { console.error(e); } finally { setIsUpdating(false); }
   };
 
-  const performBulkSearch = (text: string) => { 
-       const lines = text.split('\n').map(l => l.trim()).filter(l => l);
-      if (lines.length === 0) return alert("Sin datos.");
-      const queries = lines.map(line => {
-          const lower = line.toLowerCase();
-          if (lower.startsWith('titulo:')) return { title: line.split(':')[1].trim(), raw: line };
-          if (line.includes('-')) {
-              const parts = line.split('-');
-              if (parts.length >= 2) return { title: parts[0].trim(), performer: parts[1].trim(), raw: line };
-          }
-          return { title: line, raw: line };
-      });
-      const normalize = (s:string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
-      let newSelection = [...selectedTracksList];
-      let missing: string[] = [];
-      queries.forEach(q => {
-          const tQ = normalize(q.title || "");
-          const pQ = normalize(q.performer || "");
-          const match = tracks.find(t => {
-               const tT = normalize(t.metadata.title);
-               const tP = normalize(t.metadata.performer);
-               const titleMatch = tT.includes(tQ);
-               const perfMatch = pQ ? tP.includes(pQ) : true;
-               return titleMatch && perfMatch;
-          });
-          if(match) { if(!newSelection.find(s=>s.id===match.id)) newSelection.push(match); } 
-          else { missing.push(q.raw); }
-      });
-      setSelectedTracksList(newSelection);
-      setMissingQueries(missing);
-  };
-  
-  const handleBulkSelectTxt = (file: File) => { const r = new FileReader(); r.onload = (e) => typeof e.target?.result==='string' && performBulkSearch(e.target.result); r.readAsText(file); };
-  const handleWishlistSubmit = () => { if(!wishlistText.trim()) return; performBulkSearch(wishlistText); setShowWishlist(false); setWishlistText(''); };
   const handleSelectTrack = (track: Track) => { setSelectedTrack(track); };
-  const handleToggleSelection = (track: Track) => { setSelectedTracksList(prev => prev.find(t => t.id === track.id) ? prev.filter(t => t.id !== track.id) : [...prev, track]); };
-  const handleClearSelection = () => { if (window.confirm('¿Limpiar selección?')) { setSelectedTracksList([]); setMissingQueries([]); } };
+  const handleToggleSelection = (track: Track) => { 
+      setSelectedTracksList(prev => prev.find(t => t.id === track.id) ? prev.filter(t => t.id !== track.id) : [...prev, track]); 
+  };
+  const handleClearSelection = () => { 
+      if (window.confirm('¿Está seguro de eliminar la selección actual? Esta acción no se puede deshacer.')) { 
+          setSelectedTracksList([]); setMissingQueries([]); localStorage.removeItem(SELECTION_KEY);
+      } 
+  };
+
+  const handleSaveSelection = () => {
+      if (selectedTracksList.length === 0) return alert("Selección vacía.");
+      const date = new Date().toISOString().split('T')[0];
+      const prog = programName || "General";
+      const name = `S+${date.replace(/-/g, '')}+${prog.replace(/\s+/g, '')}`;
+      
+      const saved: SavedSelection = {
+          id: `sel-${Date.now()}`,
+          name: name,
+          date: date,
+          program: prog,
+          tracks: [...selectedTracksList]
+      };
+      
+      const existing = JSON.parse(localStorage.getItem('rcm_saved_selections') || '[]');
+      localStorage.setItem('rcm_saved_selections', JSON.stringify([...existing, saved]));
+      alert(`Selección guardada como: ${name}`);
+  };
 
   const handleOpenExportModal = () => {
       setEditingReportId(null);
@@ -322,30 +221,17 @@ const App: React.FC = () => {
       missingQueries.forEach((q, idx) => { items.push({ id: `missing-${idx}`, title: q, author: '', authorCountry: '', performer: '', performerCountry: '', genre: '', source: 'manual' }); });
       setExportItems(items); setShowExportModal(true);
   };
-  const handleUpdateExportItem = (id: string, field: keyof ExportItem, value: string) => { setExportItems(prev => prev.map(item => item.id === id ? { ...item, [field]: value } : item)); };
 
-  const handleShareCredits = () => {
-      let message = `*CRÉDITOS RCM*\n*Programa:* ${programName}\n\n`;
-      exportItems.forEach(item => { message += `🎵 *${item.title}*\n👤 ${item.performer}\n✍️ ${item.author}\n\n`; });
-      window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, '_blank');
+  const handleUpdateExportItem = (id: string, field: keyof ExportItem, value: string) => { 
+      setExportItems(prev => prev.map(item => item.id === id ? { ...item, [field]: value } : item)); 
   };
 
-  const handleDownloadTxt = () => {
-      let content = `PROGRAMA: ${programName}\n\n`;
-      exportItems.forEach(item => {
-          content += `TITULO: ${item.title}\n`;
-          content += `INTERPRETE: ${item.performer} (${item.performerCountry})\n`;
-          content += `AUTOR: ${item.author} (${item.authorCountry})\n`;
-          content += `GENERO: ${item.genre}\n`;
-          content += `-----------------------------------\n`;
+  const handleShareWhatsApp = () => {
+      let message = `*CRÉDITOS RCM*\n*Programa:* ${programName}\n\n`;
+      exportItems.forEach(item => { 
+          message += `🎵 *${item.title}*\n👤 ${item.performer}\n✍️ ${item.author}\n📂 _${item.path || 'Manual'}_\n\n`; 
       });
-      const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `Seleccion_${programName.replace(/\s+/g, '_')}.txt`;
-      a.click();
-      URL.revokeObjectURL(url);
+      window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, '_blank');
   };
 
   const handleDownloadReport = async () => {
@@ -356,9 +242,8 @@ const App: React.FC = () => {
           program: programName,
           items: exportItems
       });
-      const dateStr = new Date().toLocaleDateString('es-ES').replace(/\//g, '-');
-      const safeProgram = programName.replace(/[^a-zA-Z0-9 ]/g, '');
-      const fileName = `PM-${safeProgram}-${dateStr}.pdf`;
+      const dateStr = new Date().toISOString().split('T')[0];
+      const fileName = `PM-${programName}-${dateStr}.pdf`;
       const reportId = editingReportId || `rep-${Date.now()}`;
       
       await saveReportToDB({
@@ -371,216 +256,175 @@ const App: React.FC = () => {
           items: exportItems,
           status: { downloaded: false, sent: false }
       });
-      alert("Reporte generado correctamente.\nPuede encontrarlo en la sección 'Reportes' para descargarlo.");
+      alert("Reporte guardado localmente en la sección de Reportes.");
       setShowExportModal(false);
-      setEditingReportId(null);
   };
 
+  // Added handleEditReport to fix "Cannot find name 'handleEditReport'" error
   const handleEditReport = (report: Report) => {
       if (report.items) {
           setExportItems(report.items);
           setProgramName(report.program);
           setEditingReportId(report.id);
           setShowExportModal(true);
-      } else { alert("Reporte antiguo no editable."); }
+      } else {
+          alert("Este reporte no contiene items editables.");
+      }
   };
 
-  const handleManualEdit = (updatedTrack: Track) => {
-      const normalize = (s:string) => s.toLowerCase().normalize("NFD").replace(/[^a-z0-9]/g, "");
-      const targetTitle = normalize(updatedTrack.metadata.title);
-      const targetPerf = normalize(updatedTrack.metadata.performer);
-      updateTracks(prev => prev.map(t => {
-          if (t.id === updatedTrack.id) return updatedTrack;
-          const tTitle = normalize(t.metadata.title);
-          const tPerf = normalize(t.metadata.performer);
-          if (tTitle === targetTitle && tPerf === targetPerf) {
-             return { ...t, metadata: { ...t.metadata, author: updatedTrack.metadata.author, authorCountry: updatedTrack.metadata.authorCountry, performerCountry: updatedTrack.metadata.performerCountry, genre: updatedTrack.metadata.genre } };
-          }
-          return t;
-      }));
-      setSelectedTrack(updatedTrack);
+  const navigateTo = (v: ViewState) => { 
+      if (view === ViewState.SELECTION && v !== ViewState.SELECTION && selectedTracksList.length > 0) {
+          // Warning already handled by persistence, but good to keep UI consistent
+      }
+      setView(v); 
+      window.history.pushState({ view: v }, ''); 
   };
 
-  const handleApplyCredits = (newCredits: CreditInfo) => { }; 
-  const handleDiscardResults = () => { setView(ViewState.LIST); setFoundCredits(null); };
-
-  if (view === ViewState.LOGIN) { return <LoginScreen onLoginSuccess={handleLoginSuccess} users={users} onUpdateUsers={handleSyncUsersAndApp} isUpdating={isUpdating} />; }
-  const navigateTo = (v: ViewState) => { setView(v); window.history.pushState({ view: v }, ''); };
-
-  const getRoleLabel = () => {
-      if (authMode === 'admin') return 'COORDINADOR';
-      if (authMode === 'director') return 'DIRECTOR';
-      return 'USUARIO';
-  };
+  if (view === ViewState.LOGIN) return <LoginScreen onLoginSuccess={handleLoginSuccess} users={users} onUpdateUsers={handleSyncUsersAndApp} isUpdating={isUpdating} />;
 
   return (
     <div className="max-w-md mx-auto h-[100dvh] bg-gray-100 shadow-2xl overflow-hidden relative border-x border-gray-200 flex flex-col">
-        {/* HEADER */}
-        {view !== ViewState.RESULTS && (
-             <header className="bg-azul-header text-white px-4 py-4 flex items-center justify-between shadow-md relative z-20 shrink-0">
-                <button className="flex items-center gap-3" onClick={() => navigateTo(ViewState.LIST)}>
-                    <span className="material-symbols-outlined text-2xl">radio</span><h1 className="text-lg font-bold">RCM Música</h1>
-                </button>
-                <div className="flex items-center gap-2">
-                    {isSaving && <span className="size-2 bg-yellow-400 rounded-full animate-pulse"></span>}
-                    <div className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${authMode === 'admin' ? 'bg-miel' : 'bg-green-600'}`}>
-                        {getRoleLabel()}
-                    </div>
-                    
-                    {/* Sync Button */}
-                    <button 
-                        onClick={handleSyncUsersAndApp}
-                        className="bg-white/10 text-white rounded-full p-1.5 flex items-center justify-center hover:bg-white/20"
-                        title="Actualizar y Sincronizar"
-                    >
-                        <span className={`material-symbols-outlined text-sm ${isUpdating ? 'animate-spin' : ''}`}>sync</span>
-                    </button>
-
-                    <button onClick={handleLogout} className="text-white bg-white/10 p-2 rounded-full size-10 flex items-center justify-center"><span className="material-symbols-outlined text-xl">logout</span></button>
+        {/* HEADER WITH NEW LOGO INSPIRED BY IMAGE */}
+        <header className="bg-azul-header text-white px-4 py-3 flex items-center justify-between shadow-md relative z-20 shrink-0">
+            <button className="flex items-center gap-2" onClick={() => navigateTo(ViewState.LIST)}>
+                <div className="size-10 relative flex items-center justify-center bg-white rounded-full p-1 shadow-inner overflow-hidden border-2 border-miel/30">
+                    <svg viewBox="0 0 100 100" className="size-full">
+                        <circle cx="50" cy="50" r="48" fill="white" />
+                        <rect x="0" y="60" width="100" height="40" fill="#df4534" opacity="0.8" />
+                        <path d="M40 30 L40 50 Q40 55 35 55 Q30 55 30 50 Q30 45 35 45 Q40 45 40 50" stroke="#df4534" strokeWidth="4" fill="none" />
+                        <path d="M60 55 L60 25 L75 40" stroke="#1a3a5f" strokeWidth="4" fill="none" />
+                        <line x1="60" y1="55" x2="60" y2="25" stroke="#1a3a5f" strokeWidth="4" />
+                        <circle cx="60" cy="25" r="3" fill="#df4534" />
+                        <path d="M55 20 Q60 10 65 20" stroke="#1a3a5f" strokeWidth="1" fill="none" opacity="0.5" />
+                        <rect x="35" y="70" width="30" height="2" fill="white" />
+                        <circle cx="40" cy="80" r="2" fill="white" />
+                        <circle cx="50" cy="80" r="2" fill="white" />
+                        <circle cx="60" cy="80" r="2" fill="white" />
+                    </svg>
                 </div>
-            </header>
-        )}
+                <div className="flex flex-col">
+                    <h1 className="text-sm font-bold leading-none tracking-tight">RCM MÚSICA</h1>
+                    <span className="text-[8px] opacity-70 tracking-widest font-bold">FONOTECA DIGITAL</span>
+                </div>
+            </button>
+            <div className="flex items-center gap-2">
+                <div className={`text-[8px] font-bold px-1.5 py-0.5 rounded uppercase ${authMode === 'admin' ? 'bg-miel' : 'bg-green-600'}`}>
+                    {authMode === 'admin' ? 'COORDINADOR' : (authMode === 'director' ? 'DIRECTOR' : 'USUARIO')}
+                </div>
+                <button onClick={handleLogout} className="text-white bg-white/10 p-2 rounded-full size-8 flex items-center justify-center"><span className="material-symbols-outlined text-base">logout</span></button>
+            </div>
+        </header>
 
         {/* LOADING OVERLAY */}
-        {(isUpdating || uploadStatus.isUploading) && (
+        {isUpdating && (
             <div className="absolute inset-0 z-[60] flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm text-white p-6">
-                <div className="size-16 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4"></div>
-                <div className="text-center w-full max-w-xs">
-                    <p className="font-bold text-lg mb-2">Procesando...</p>
-                    <p className="text-sm text-gray-300 mb-4 truncate">{uploadStatus.currentFileName}</p>
-                    {uploadStatus.totalFiles > 0 && <p className="text-xs text-gray-400 font-mono">{uploadStatus.currentFile} / {uploadStatus.totalFiles}</p>}
-                </div>
-            </div>
-        )}
-
-        {/* WELCOME TUTORIAL OVERLAY */}
-        {showWelcomeTutorial && (
-            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-6 animate-fade-in" onClick={handleCloseTutorial}>
-                <div className="bg-white dark:bg-zinc-900 rounded-2xl p-6 max-w-sm text-center shadow-2xl" onClick={e => e.stopPropagation()}>
-                    <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4 text-azul-header">
-                        <span className="material-symbols-outlined text-4xl">waving_hand</span>
-                    </div>
-                    <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-2">¡Bienvenido a RCM Música!</h2>
-                    <p className="text-sm text-gray-500 mb-6">Esta aplicación te permite gestionar, buscar y reportar el uso de la fonoteca de la emisora. Revisa la sección <strong>Guía</strong> si necesitas ayuda.</p>
-                    <button onClick={handleCloseTutorial} className="w-full bg-azul-header text-white font-bold py-3 rounded-xl">Entendido</button>
-                </div>
+                <div className="size-12 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4"></div>
+                <p className="font-bold">Sincronizando...</p>
             </div>
         )}
 
         {/* MAIN CONTENT */}
         <div className="flex-1 overflow-hidden relative">
             {view === ViewState.LIST && (
-                <TrackList tracks={tracks} onSelectTrack={handleSelectTrack} onUploadTxt={handleUploadMultipleTxt} isAdmin={authMode === 'admin'} onSyncRoot={handleSyncMusicRoot} onExportRoot={handleExportMusicRoot} onClearRoot={handleClearMusicRoot} selectedTrackIds={new Set(selectedTracksList.map(t => t.id))} onToggleSelection={handleToggleSelection} />
+                <TrackList 
+                    tracks={tracks} 
+                    onSelectTrack={handleSelectTrack} 
+                    onUploadTxt={handleUploadMultipleTxt} 
+                    isAdmin={authMode === 'admin'} 
+                    onSyncRoot={() => {}} 
+                    onExportRoot={() => {}} 
+                    onClearRoot={() => {}} 
+                    customRoots={customRoots}
+                    onAddCustomRoot={handleAddCustomRoot}
+                    onRenameRoot={handleRenameRoot}
+                />
             )}
             
             {view === ViewState.SELECTION && (
                 <div className="h-full bg-background-light dark:bg-background-dark overflow-y-auto flex flex-col">
-                    <TrackList tracks={selectedTracksList} onSelectTrack={handleSelectTrack} onUploadTxt={handleUploadMultipleTxt} onBulkSelectTxt={handleBulkSelectTxt} isAdmin={false} onSyncRoot={() => {}} onExportRoot={() => {}} onClearRoot={() => {}} selectedTrackIds={new Set(selectedTracksList.map(t => t.id))} onToggleSelection={handleToggleSelection} onOpenExportPreview={handleOpenExportModal} isSelectionView={true} onClearSelection={handleClearSelection} onOpenWishlist={() => setShowWishlist(true)} missingQueries={missingQueries} onClearMissing={() => setMissingQueries([])} />
+                    <TrackList 
+                        tracks={selectedTracksList} 
+                        onSelectTrack={handleSelectTrack} 
+                        onUploadTxt={() => {}} 
+                        isAdmin={false} 
+                        onSyncRoot={() => {}} 
+                        onExportRoot={() => {}} 
+                        onClearRoot={() => {}} 
+                        isSelectionView={true} 
+                        onClearSelection={handleClearSelection}
+                        onOpenExportPreview={handleOpenExportModal}
+                        customRoots={[]}
+                        onAddCustomRoot={() => {}}
+                        onRenameRoot={() => {}}
+                    />
+                    <div className="p-4 bg-white border-t border-gray-100 flex gap-2">
+                         <button onClick={handleSaveSelection} className="flex-1 bg-green-600 text-white py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 shadow-sm">
+                            <span className="material-symbols-outlined text-sm">save</span> Guardar Selección
+                         </button>
+                         <button onClick={handleClearSelection} className="flex-1 bg-red-500 text-white py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 shadow-sm">
+                            <span className="material-symbols-outlined text-sm">delete</span> Eliminar Selección
+                         </button>
+                    </div>
                 </div>
             )}
 
-            {view === ViewState.SETTINGS && authMode === 'admin' && <Settings tracks={tracks} users={users} onAddUser={handleAddUser} onEditUser={handleEditUser} onDeleteUser={handleDeleteUser} onExportUsers={handleExportUsers} onImportUsers={handleImportUsers} currentUser={currentUser} />}
-            {/* PASS updateTracks TO PRODUCTIONS */}
+            {view === ViewState.SETTINGS && authMode === 'admin' && <Settings tracks={tracks} users={users} onAddUser={() => {}} onEditUser={() => {}} onDeleteUser={() => {}} onExportUsers={() => {}} onImportUsers={() => {}} currentUser={currentUser} />}
             {view === ViewState.PRODUCTIONS && authMode === 'admin' && <Productions onUpdateTracks={updateTracks} allTracks={tracks} />}
-            {view === ViewState.REPORTS && authMode === 'director' && <ReportsViewer users={users} onEdit={handleEditReport} currentUser={currentUser} />}
+            {view === ViewState.REPORTS && (authMode === 'director' || authMode === 'admin') && <ReportsViewer onEdit={handleEditReport} currentUser={currentUser} />}
             {view === ViewState.GUIDE && <Guide />}
-            {view === ViewState.RESULTS && selectedTrack && <CreditResults originalTrack={selectedTrack} foundCredits={foundCredits} isLoading={isSearching} onApply={handleApplyCredits} onDiscard={handleDiscardResults} />}
         </div>
 
         {/* EXPORT MODAL */}
         {showExportModal && (
-            <div className="absolute inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4 animate-fade-in" onClick={() => setShowExportModal(false)}>
-                <div className="w-full max-w-lg bg-white dark:bg-zinc-900 h-[90vh] sm:h-[85vh] rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col relative overflow-hidden animate-slide-up" onClick={e => e.stopPropagation()}>
-                    <div className="flex justify-between items-center p-4 border-b border-gray-100 dark:border-gray-800 shrink-0">
-                        <div>
-                            <h3 className="text-lg font-bold text-gray-800 dark:text-white flex items-center gap-2"><span className="material-symbols-outlined text-miel">edit_document</span> Editar y Exportar</h3>
-                        </div>
-                        <button onClick={() => setShowExportModal(false)} className="text-gray-400"><span className="material-symbols-outlined">close</span></button>
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in" onClick={() => setShowExportModal(false)}>
+                <div className="w-full max-w-sm bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
+                    <div className="flex justify-between items-center p-4 border-b">
+                        <h3 className="font-bold text-gray-800">Exportar Reporte</h3>
+                        <button onClick={() => setShowExportModal(false)}><span className="material-symbols-outlined">close</span></button>
                     </div>
-                    <div className="p-4 border-b border-gray-100 dark:border-gray-800 shrink-0 bg-gray-50 dark:bg-black/10">
-                         <label className="block text-xs font-bold text-gray-500 mb-1">Nombre del Programa</label>
-                         <select value={programName} onChange={e => setProgramName(e.target.value)} className="w-full p-2.5 rounded-lg border border-gray-200 dark:border-gray-700 text-sm bg-white dark:bg-zinc-800 appearance-none">
+                    <div className="p-4 bg-gray-50 space-y-3">
+                         <label className="block text-[10px] font-bold text-gray-400 uppercase">Programa</label>
+                         <select value={programName} onChange={e => setProgramName(e.target.value)} className="w-full p-2 border rounded bg-white">
                             {PROGRAMS_LIST.map(p => <option key={p} value={p}>{p}</option>)}
                          </select>
                     </div>
                     <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                        {exportItems.map((item, idx) => (
-                            <div key={item.id} className={`p-3 rounded-xl border ${item.source === 'manual' ? 'border-orange-200 bg-orange-50/50' : 'border-gray-200 bg-white'} dark:border-gray-700 dark:bg-zinc-800`}>
-                                <div className="flex justify-between items-start mb-2">
-                                    <span className="text-[10px] font-bold uppercase text-gray-400 bg-gray-100 dark:bg-white/10 px-1.5 rounded">{idx + 1}</span>
-                                    {item.source === 'manual' && <span className="text-[10px] font-bold text-orange-500 uppercase">No encontrado</span>}
-                                </div>
-                                <div className="grid gap-2">
-                                    <input className="w-full p-1.5 text-sm font-bold border-b border-transparent focus:border-primary bg-transparent outline-none" placeholder="Título" value={item.title} onChange={e => handleUpdateExportItem(item.id, 'title', e.target.value)} />
-                                    <div className="grid grid-cols-2 gap-2">
-                                        <input className="text-xs p-1 border rounded bg-white/50 dark:bg-black/20" placeholder="Autor" value={item.author} onChange={e => handleUpdateExportItem(item.id, 'author', e.target.value)} />
-                                        <input className="text-xs p-1 border rounded bg-white/50 dark:bg-black/20" placeholder="País Autor" value={item.authorCountry} onChange={e => handleUpdateExportItem(item.id, 'authorCountry', e.target.value)} />
-                                    </div>
-                                    <div className="grid grid-cols-2 gap-2">
-                                        <input className="text-xs p-1 border rounded bg-white/50 dark:bg-black/20" placeholder="Intérprete" value={item.performer} onChange={e => handleUpdateExportItem(item.id, 'performer', e.target.value)} />
-                                        <input className="text-xs p-1 border rounded bg-white/50 dark:bg-black/20" placeholder="País Intérprete" value={item.performerCountry} onChange={e => handleUpdateExportItem(item.id, 'performerCountry', e.target.value)} />
-                                    </div>
-                                    <input className="text-xs p-1 border rounded bg-white/50 dark:bg-black/20 w-1/2" placeholder="Género" value={item.genre} onChange={e => handleUpdateExportItem(item.id, 'genre', e.target.value)} />
-                                </div>
+                        {exportItems.map(item => (
+                            <div key={item.id} className="p-2 border rounded text-xs">
+                                <p className="font-bold">{item.title}</p>
+                                <p className="text-gray-500">{item.performer} | {item.author}</p>
+                                <p className="text-[10px] text-gray-400 italic truncate">{item.path || 'Manual'}</p>
                             </div>
                         ))}
                     </div>
-                    <div className="p-4 bg-white dark:bg-zinc-900 border-t border-gray-100 dark:border-gray-800 shrink-0 grid grid-cols-2 gap-3">
-                         <button onClick={handleShareCredits} className="bg-[#25D366] text-white py-3 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-1 hover:brightness-95">
-                            <span className="material-symbols-outlined text-lg">share</span> <span>WhatsApp</span>
+                    <div className="p-4 grid grid-cols-2 gap-2">
+                        <button onClick={handleShareWhatsApp} className="bg-[#25D366] text-white py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2">
+                            <span className="material-symbols-outlined text-sm">share</span> WhatsApp
                         </button>
-                        <button onClick={handleDownloadTxt} className="bg-gray-600 text-white py-3 rounded-xl font-bold text-xs flex flex-col items-center justify-center gap-1 hover:brightness-95">
-                            <span className="material-symbols-outlined text-lg">text_snippet</span> <span>TXT</span>
+                        <button onClick={handleDownloadReport} className="bg-azul-header text-white py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2">
+                            <span className="material-symbols-outlined text-sm">save_as</span> PDF
                         </button>
-                        {authMode === 'director' && (
-                             <button onClick={handleDownloadReport} className="col-span-2 bg-azul-header text-white py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 hover:brightness-95 shadow-md">
-                                <span className="material-symbols-outlined text-lg">save_as</span> 
-                                <span>{editingReportId ? 'Actualizar Reporte PDF' : 'Generar Reporte PDF'}</span>
-                            </button>
-                        )}
                     </div>
                 </div>
             </div>
         )}
 
-        {/* WISHLIST MODAL */}
-        {showWishlist && (
-            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in" onClick={() => setShowWishlist(false)}>
-                <div className="w-full max-w-sm bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl p-6" onClick={e => e.stopPropagation()}>
-                    <h3 className="text-xl font-bold mb-4">Lista de Deseos</h3>
-                    <textarea className="w-full h-48 p-3 rounded-xl border mb-4 text-sm bg-gray-50" placeholder="Temas..." value={wishlistText} onChange={e => setWishlistText(e.target.value)}></textarea>
-                    <button onClick={handleWishlistSubmit} className="w-full bg-primary text-white font-bold py-3 rounded-xl">Buscar</button>
-                </div>
-            </div>
-        )}
-
-        {/* TRACK DETAIL MODAL */}
-        {(view === ViewState.LIST || view === ViewState.SELECTION) && selectedTrack && (
-            <TrackDetail track={selectedTrack} onClose={() => setSelectedTrack(null)} onSearchCredits={() => {}} authMode={authMode} onSaveEdit={handleManualEdit} />
-        )}
-        
         {/* NAVIGATION BAR */}
-        {view !== ViewState.RESULTS && (
-            <nav className="bg-white dark:bg-background-dark border-t border-gray-200 dark:border-gray-800 h-20 px-2 flex items-center justify-between pb-2 z-20 shrink-0 overflow-x-auto">
-                <NavButton icon="folder_open" label="Explorador" active={view === ViewState.LIST} onClick={() => navigateTo(ViewState.LIST)} />
-                <NavButton icon="checklist" label="Selección" active={view === ViewState.SELECTION} onClick={() => navigateTo(ViewState.SELECTION)} />
-                
-                {authMode === 'director' && <NavButton icon="description" label="Reportes" active={view === ViewState.REPORTS} onClick={() => navigateTo(ViewState.REPORTS)} />}
-                {authMode !== 'admin' && <NavButton icon="help" label="Guía" active={view === ViewState.GUIDE} onClick={() => navigateTo(ViewState.GUIDE)} />}
-
-                {authMode === 'admin' && <NavButton icon="playlist_add" label="Producción" active={view === ViewState.PRODUCTIONS} onClick={() => navigateTo(ViewState.PRODUCTIONS)} />}
-                {authMode === 'admin' && <NavButton icon="settings" label="Ajustes" active={view === ViewState.SETTINGS} onClick={() => navigateTo(ViewState.SETTINGS)} />}
-            </nav>
-        )}
+        <nav className="bg-white dark:bg-background-dark border-t border-gray-200 dark:border-gray-800 h-20 px-2 flex items-center justify-between pb-2 z-20 shrink-0">
+            <NavButton icon="folder_open" label="Explorador" active={view === ViewState.LIST} onClick={() => navigateTo(ViewState.LIST)} />
+            <NavButton icon="checklist" label="Selección" active={view === ViewState.SELECTION} onClick={() => navigateTo(ViewState.SELECTION)} />
+            {(authMode === 'director' || authMode === 'admin') && <NavButton icon="description" label="Reportes" active={view === ViewState.REPORTS} onClick={() => navigateTo(ViewState.REPORTS)} />}
+            {authMode === 'admin' && <NavButton icon="playlist_add" label="Producción" active={view === ViewState.PRODUCTIONS} onClick={() => navigateTo(ViewState.PRODUCTIONS)} />}
+            <NavButton icon="help" label="Guía" active={view === ViewState.GUIDE} onClick={() => navigateTo(ViewState.GUIDE)} />
+        </nav>
     </div>
   );
 };
 
 const NavButton: React.FC<{ icon: string, label: string, active: boolean, onClick: () => void }> = ({ icon, label, active, onClick }) => (
-    <button onClick={onClick} className={`flex-1 min-w-[60px] flex flex-col items-center justify-center h-full transition-colors relative ${active ? 'text-azul-header dark:text-blue-400' : 'text-gray-400 dark:text-gray-500'}`}>
+    <button onClick={onClick} className={`flex-1 flex flex-col items-center justify-center h-full transition-colors relative ${active ? 'text-azul-header' : 'text-gray-400'}`}>
         <span className={`material-symbols-outlined text-2xl ${active ? 'material-symbols-filled' : ''}`}>{icon}</span>
-        <span className="text-[9px] font-bold uppercase tracking-wide mt-1 truncate">{label}</span>
-        {active && <span className="absolute bottom-1 w-1 h-1 bg-current rounded-full"></span>}
+        <span className="text-[9px] font-bold uppercase tracking-wide mt-1">{label}</span>
     </button>
 );
 

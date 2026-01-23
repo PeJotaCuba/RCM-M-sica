@@ -10,11 +10,11 @@ export interface Track {
 
 export interface CreditInfo {
   title: string;
-  author: string; // Composer/Writer
+  author: string;
   authorCountry?: string;
-  performer: string; // Artist/Band
+  performer: string;
   performerCountry?: string;
-  album: string; // Used as "Folder Name" in some contexts
+  album: string;
   year: string;
   genre?: string;
 }
@@ -25,12 +25,25 @@ export interface User {
   role: 'admin' | 'director' | 'user'; 
   fullName: string;
   phone: string;
-  uniqueId?: string; // Código único de firma digital
+  uniqueId?: string;
 }
 
 export interface ReportStatus {
     downloaded: boolean;
     sent: boolean;
+    cloudUploaded?: boolean;
+}
+
+export interface ExportItem {
+    id: string;
+    title: string;
+    author: string;
+    authorCountry: string;
+    performer: string;
+    performerCountry: string;
+    genre: string;
+    source: 'db' | 'manual';
+    path?: string;
 }
 
 export interface Report {
@@ -39,9 +52,17 @@ export interface Report {
     program: string;
     generatedBy: string;
     fileName: string;
-    pdfBlob: Blob; // Almacenado en IndexedDB
-    items?: any[]; // Guardamos los items para poder re-editar el reporte
+    pdfBlob: Blob; 
+    items?: ExportItem[];
     status?: ReportStatus;
+}
+
+export interface SavedSelection {
+    id: string;
+    name: string;
+    date: string;
+    program: string;
+    tracks: Track[];
 }
 
 export enum ViewState {
@@ -53,6 +74,11 @@ export enum ViewState {
   PRODUCTIONS = 'PRODUCTIONS',
   REPORTS = 'REPORTS',
   GUIDE = 'GUIDE'
+}
+
+export interface CustomRoot {
+  id: string;
+  name: string;
 }
 
 export type FilterType = 'title' | 'author' | 'performer' | 'folder';

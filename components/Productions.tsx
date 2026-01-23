@@ -1,545 +1,61 @@
 
-import React, { useState, useMemo } from 'react';
-import { Track, PROGRAMS_LIST, Report } from '../types';
-import { loadReportsFromDB } from '../services/db';
-import * as docx from 'docx';
-import * as XLSX from 'xlsx';
+import React, { useEffect, useState } from 'react';
+import { Track, Report } from '../types';
 
 interface ProductionsProps {
   onUpdateTracks: (updateFunc: (prev: Track[]) => Track[]) => void;
   allTracks?: Track[];
 }
 
-const Productions: React.FC<ProductionsProps> = ({ onUpdateTracks, allTracks = [] }) => {
-  const [entryDate, setEntryDate] = useState(new Date().toISOString().split('T')[0]);
-  const [entryProgram, setEntryProgram] = useState(PROGRAMS_LIST[0]);
-  const [txtProcessing, setTxtProcessing] = useState(false);
-  
-  // Report Dashboard State
-  const [reportStartDate, setReportStartDate] = useState(new Date().toISOString().split('T')[0]);
-  const [reportEndDate, setReportEndDate] = useState(new Date().toISOString().split('T')[0]);
-  const [reportProgram, setReportProgram] = useState(PROGRAMS_LIST[0]);
-  const [reportScope, setReportScope] = useState<'program'>('program');
-  const [showGlobalStats, setShowGlobalStats] = useState(false);
-  const [globalReports, setGlobalReports] = useState<Report[]>([]);
+const Productions: React.FC<ProductionsProps> = ({ allTracks = [] }) => {
+  const [sharedReports, setSharedReports] = useState<Report[]>([]);
+  const [previewReport, setPreviewReport] = useState<Report | null>(null);
 
-  // Loaded Batches Modal State
-  const [showLoadedBatches, setShowLoadedBatches] = useState(false);
-  const [batchFilterDate, setBatchFilterDate] = useState('');
-  const [batchFilterProgram, setBatchFilterProgram] = useState('');
-
-  // PARSER SPECIFIC FOR REPORT TXT FORMAT (MULTI-LINE)
-  const parseTxtReport = (text: string, defaultProgram: string, defaultDate: string): Track[] => {
-    const lines = text.split('\n').map(l => l.trim()).filter(l => l);
-    
-    let fileProgram = defaultProgram;
-    let fileDate = defaultDate;
-
-    // 1. Scan for Global Headers first
-    for (const line of lines) {
-        const lower = line.toLowerCase();
-        if (lower.startsWith('fecha:')) {
-            const rawDate = line.substring(6).trim();
-            const parts = rawDate.split('/');
-            if (parts.length === 3) {
-                 // Normalize to YYYY-MM-DD (Assumes DD/MM/YYYY input)
-                 const d = parts[0].padStart(2, '0');
-                 const m = parts[1].padStart(2, '0');
-                 const y = parts[2];
-                 fileDate = `${y}-${m}-${d}`;
-            } else {
-                 fileDate = rawDate;
-            }
-        } 
-        else if (lower.startsWith('programa:')) {
-            fileProgram = line.substring(9).trim();
-        }
-        else if (lower.startsWith('formato:')) {
-             fileProgram = line.substring(8).trim();
-        }
-    }
-
-    const tracks: Track[] = [];
-    let currentId = 0;
-
-    const extractNameCountry = (str: string) => {
-        const match = str.match(/^(.*?)\s*\(([^)]+)\)$/);
-        if (match) return { name: match[1].trim(), country: match[2].trim() };
-        return { name: str.trim(), country: '' };
-    };
-
-    // 2. Scan for Tracks (Block based)
-    // [1] Title
-    // Autor: ...
-    // Intérprete: ...
-    // Género: ...
-
-    let currentTrack: { title: string, author: string, performer: string, genre: string } | null = null;
-
-    const saveCurrentTrack = () => {
-        if (currentTrack) {
-            const authorData = extractNameCountry(currentTrack.author || 'Desconocido');
-            const performerData = extractNameCountry(currentTrack.performer || 'Desconocido');
-
-            tracks.push({
-                id: `imp-${Date.now()}-${Math.random().toString(36).substr(2, 5)}-${currentId++}`,
-                filename: `${currentTrack.title}.mp3`,
-                path: 'Importado TXT',
-                isVerified: true,
-                metadata: {
-                    title: currentTrack.title,
-                    author: authorData.name,
-                    authorCountry: authorData.country,
-                    performer: performerData.name,
-                    performerCountry: performerData.country,
-                    genre: currentTrack.genre || 'Desconocido',
-                    album: `Producción: ${fileProgram} (${fileDate})`,
-                    year: fileDate.split('-')[0] || new Date().getFullYear().toString()
-                }
-            } as Track);
-            currentTrack = null;
-        }
-    };
-
-    for (const line of lines) {
-        // Check for new track start: e.g., "[1] Como en los sueños"
-        const trackStartMatch = line.match(/^\[\d+\]\s+(.*)/);
-
-        if (trackStartMatch) {
-            saveCurrentTrack(); // Save previous if exists
-            currentTrack = {
-                title: trackStartMatch[1].trim(),
-                author: '',
-                performer: '',
-                genre: ''
-            };
-            continue;
-        }
-
-        if (currentTrack) {
-            const lower = line.toLowerCase();
-            if (lower.startsWith('autor:')) {
-                currentTrack.author = line.substring(6).trim();
-            } else if (lower.startsWith('intérprete:') || lower.startsWith('interprete:')) {
-                const parts = line.split(':');
-                if (parts.length > 1) currentTrack.performer = parts.slice(1).join(':').trim();
-            } else if (lower.startsWith('género:') || lower.startsWith('genero:')) {
-                const parts = line.split(':');
-                if (parts.length > 1) currentTrack.genre = parts.slice(1).join(':').trim();
-            }
-        }
-    }
-    
-    // Save the last one
-    saveCurrentTrack();
-
-    return tracks;
-  };
-
-  const handleTxtUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-      if (!e.target.files || e.target.files.length === 0) return;
-      const files: File[] = Array.from(e.target.files);
-      
-      setTxtProcessing(true);
-      let totalTracks = 0;
-      let filesProcessed = 0;
-
-      const newTracksBuffer: Track[] = [];
-
-      try {
-          await Promise.all(files.map(async (file) => {
-              try {
-                  const text = await file.text();
-                  // Use file headers if available, otherwise fallback to UI input
-                  const fileTracks = parseTxtReport(text, entryProgram, entryDate);
-                  if (fileTracks.length > 0) {
-                      newTracksBuffer.push(...fileTracks);
-                      totalTracks += fileTracks.length;
-                  }
-                  filesProcessed++;
-              } catch (err) {
-                  console.error(`Error processing ${file.name}`, err);
-              }
-          }));
-
-          if (totalTracks > 0) {
-              onUpdateTracks(prev => [...prev, ...newTracksBuffer]);
-              alert(`${totalTracks} pistas extraídas de ${filesProcessed} archivo(s).`);
-          } else {
-              alert("No se detectaron pistas válidas. Asegúrese de usar el formato del Reporte Oficial:\n\n[1] Título\nAutor: Nombre (País)\nIntérprete: Nombre (País)\nGénero: Estilo");
-          }
-      } catch (err) {
-          alert("Error general leyendo archivos.");
-      } finally {
-          setTxtProcessing(false);
-          e.target.value = ''; 
-      }
-  };
-
-  // --- BATCH MANAGEMENT ---
-  const loadedBatches = useMemo(() => {
-      const batches: Record<string, { program: string, date: string, count: number, id: string }> = {};
-      
-      allTracks.forEach(t => {
-          if (t.path === 'Importado TXT' && t.metadata.album?.startsWith('Producción:')) {
-              const batchId = t.metadata.album;
-              if (!batches[batchId]) {
-                  const match = batchId.match(/Producción: (.*) \(([\d-]+)\)$/);
-                  const prog = match ? match[1] : 'Desconocido';
-                  const date = match ? match[2] : 'Desconocido';
-                  
-                  batches[batchId] = {
-                      id: batchId,
-                      program: prog,
-                      date: date,
-                      count: 0
-                  };
-              }
-              batches[batchId].count++;
-          }
-      });
-      
-      return Object.values(batches).sort((a,b) => b.date.localeCompare(a.date));
-  }, [allTracks]);
-
-  const filteredBatches = loadedBatches.filter(b => {
-      const dateMatch = batchFilterDate ? b.date === batchFilterDate : true;
-      const progMatch = batchFilterProgram ? b.program === batchFilterProgram : true;
-      return dateMatch && progMatch;
-  });
-
-  const handleDeleteBatch = (batchId: string) => {
-      if (window.confirm("¿Estás seguro de eliminar este lote de pistas importadas?")) {
-          onUpdateTracks(prev => prev.filter(t => t.metadata.album !== batchId));
-      }
-  };
-
-  // --- REPORTING LOGIC ---
-  const handleOpenGlobalStats = async () => {
-      const reports = await loadReportsFromDB();
-      setGlobalReports(reports);
-      setShowGlobalStats(true);
-  };
-
-  const getFilteredTracks = () => {
-      const start = new Date(reportStartDate);
-      const end = new Date(reportEndDate);
-      end.setHours(23, 59, 59);
-
-      return allTracks.filter(t => {
-          if (!t.metadata.album || !t.metadata.album.startsWith("Producción:")) return false;
-          const match = t.metadata.album.match(/\(([\d-]+)\)$/);
-          if (!match) return false;
-          const trackDate = new Date(match[1]);
-          if (isNaN(trackDate.getTime())) return false;
-          const inRange = trackDate >= start && trackDate <= end;
-          if (!inRange) return false;
-          if (reportScope === 'program') {
-              return t.metadata.album.includes(`Producción: ${reportProgram}`);
-          }
-          return true;
-      });
-  };
-
-  const exportToCSV = () => {
-      const reportTracks = getFilteredTracks();
-      if (reportTracks.length === 0) { alert("No hay datos."); return; }
-      const dataForCsv = reportTracks.map(t => {
-          let fecha = "";
-          let programa = "";
-          const match = t.metadata.album.match(/Producción: (.*) \(([\d-]+)\)$/);
-          if (match) { programa = match[1]; fecha = match[2]; }
-          return {
-              "Fecha": fecha, "Programa": programa, "Título": t.metadata.title,
-              "Autor": t.metadata.author, "País Autor": t.metadata.authorCountry,
-              "Intérprete": t.metadata.performer, "País Intérprete": t.metadata.performerCountry,
-              "Género": t.metadata.genre, "Año": t.metadata.year
-          };
-      });
-      const worksheet = XLSX.utils.json_to_sheet(dataForCsv);
-      const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, "Producciones");
-      XLSX.writeFile(workbook, "Producciones.csv");
-  };
-
-  const generateDocxReport = async () => {
-      const reportTracks = getFilteredTracks();
-      if (reportTracks.length === 0) { alert("No hay datos."); return; }
-
-      const totalWorks = reportTracks.length;
-      const cubaCount = reportTracks.filter(t => 
-          (t.metadata.authorCountry && t.metadata.authorCountry.toLowerCase().includes('cuba')) || 
-          (t.metadata.performerCountry && t.metadata.performerCountry.toLowerCase().includes('cuba'))
-      ).length;
-      const foreignCount = totalWorks - cubaCount;
-
-      const getTop = (key: 'title' | 'author' | 'performer' | 'genre', limit = 5) => {
-          const counts: Record<string, number> = {};
-          reportTracks.forEach(t => { const val = t.metadata[key]; if (val && val !== 'Desconocido' && val !== '') counts[val] = (counts[val] || 0) + 1; });
-          return Object.entries(counts).sort((a,b) => b[1] - a[1]).slice(0, limit);
+  useEffect(() => {
+      const loadShared = () => {
+          const shared = JSON.parse(localStorage.getItem('rcm_shared_reports') || '[]');
+          setSharedReports(shared);
       };
+      loadShared();
+  }, []);
 
-      const topWorks = getTop('title');
-      const topAuthors = getTop('author');
-      const topGenres = getTop('genre');
-      const titleText = reportScope === 'program' ? `Programa: ${reportProgram}` : "Reporte General";
-
-      const doc = new docx.Document({
-          sections: [{
-              properties: {},
-              children: [
-                  new docx.Paragraph({ children: [new docx.TextRun({ text: "DIRECCIÓN NACIONAL DE MÚSICA", bold: true, size: 28 })], alignment: docx.AlignmentType.CENTER }),
-                  new docx.Paragraph({ children: [new docx.TextRun({ text: "ESTADÍSTICAS MUSICALES", bold: true, size: 24 })], alignment: docx.AlignmentType.CENTER, spacing: { after: 200 } }),
-                  new docx.Paragraph({ text: `Emisora: RADIO CIUDAD MONUMENTO | ${titleText}`, heading: docx.HeadingLevel.HEADING_3 }),
-                  new docx.Paragraph({ text: `Periodo: ${reportStartDate} al ${reportEndDate}`, heading: docx.HeadingLevel.HEADING_3, spacing: { after: 200 } }),
-                  new docx.Paragraph({ text: "Obras por origen", bold: true }),
-                  new docx.Table({
-                      width: { size: 100, type: docx.WidthType.PERCENTAGE },
-                      rows: [
-                          new docx.TableRow({ children: ["Origen", "Cantidad", "%"].map(t => new docx.TableCell({ children: [new docx.Paragraph({text: t, bold: true})]})) }),
-                          new docx.TableRow({ children: [new docx.TableCell({ children: [new docx.Paragraph("Cuba")] }), new docx.TableCell({ children: [new docx.Paragraph(cubaCount.toString())] }), new docx.TableCell({ children: [new docx.Paragraph(totalWorks > 0 ? ((cubaCount/totalWorks)*100).toFixed(1) + "%" : "0%")] })] }),
-                          new docx.TableRow({ children: [new docx.TableCell({ children: [new docx.Paragraph("Extranjera")] }), new docx.TableCell({ children: [new docx.Paragraph(foreignCount.toString())] }), new docx.TableCell({ children: [new docx.Paragraph(totalWorks > 0 ? ((foreignCount/totalWorks)*100).toFixed(1) + "%" : "0%")] })] })
-                      ]
-                  }),
-                   new docx.Paragraph({ text: "" }),
-                   new docx.Paragraph({ text: "Más difundidos", bold: true }),
-                   new docx.Table({
-                       width: { size: 100, type: docx.WidthType.PERCENTAGE },
-                       rows: [
-                           new docx.TableRow({ children: ["Categoría", "Top 1"].map(t => new docx.TableCell({ children: [new docx.Paragraph({text: t, bold: true})]})) }),
-                           new docx.TableRow({ children: [new docx.TableCell({ children: [new docx.Paragraph("Obra")] }), new docx.TableCell({ children: [new docx.Paragraph(topWorks[0]?.[0] || "-")] })] }),
-                           new docx.TableRow({ children: [new docx.TableCell({ children: [new docx.Paragraph("Autor")] }), new docx.TableCell({ children: [new docx.Paragraph(topAuthors[0]?.[0] || "-")] })] }),
-                           new docx.TableRow({ children: [new docx.TableCell({ children: [new docx.Paragraph("Género")] }), new docx.TableCell({ children: [new docx.Paragraph(topGenres[0]?.[0] || "-")] })] }),
-                       ]
-                   })
-              ]
-          }]
-      });
-
-      docx.Packer.toBlob(doc).then(blob => {
-          const url = window.URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url; a.download = `Reporte.docx`; a.click(); window.URL.revokeObjectURL(url);
-      });
+  const handleDownload = (report: Report) => {
+      // Logic would normally fetch from Git, here we use the stored mock
+      alert(`Descargando: ${report.fileName}`);
   };
 
   return (
-    <div className="flex flex-col h-full bg-background-light dark:bg-background-dark p-6 overflow-y-auto pb-24">
-        
-        {/* DATA ENTRY */}
+    <div className="flex flex-col h-full bg-background-light p-6 overflow-y-auto pb-24">
+        <h2 className="text-2xl font-bold mb-6 flex items-center gap-2"><span className="material-symbols-outlined text-primary">playlist_add</span> Producciones</h2>
+
         <div className="mb-8">
-            <div className="flex items-center gap-3 mb-6 text-primary">
-                <span className="material-symbols-outlined text-3xl">playlist_add</span>
-                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Ingreso de Datos</h2>
-            </div>
-            
-            {/* Disclaimer about file override */}
-            <div className="mb-4 bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg border border-blue-100 dark:border-blue-800 text-xs text-blue-800 dark:text-blue-200">
-                <p><strong>Nota:</strong> El sistema detectará automáticamente "Fecha" y "Programa" si están presentes en el archivo.</p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4 mb-6">
-                <div>
-                    <label className="block text-xs font-bold text-gray-500 mb-1">Fecha (Por defecto)</label>
-                    <input type="date" value={entryDate} onChange={e => setEntryDate(e.target.value)} className="w-full p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 dark:text-white"/>
-                </div>
-                <div>
-                    <label className="block text-xs font-bold text-gray-500 mb-1">Programa (Por defecto)</label>
-                    <select value={entryProgram} onChange={e => setEntryProgram(e.target.value)} className="w-full p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 dark:text-white appearance-none">
-                        {PROGRAMS_LIST.map(p => <option key={p} value={p}>{p}</option>)}
-                    </select>
-                </div>
-            </div>
-
-            {/* TXT Entry */}
-            <div className="flex flex-col gap-3">
-                <div>
-                    <label className="block text-xs font-bold text-gray-500 mb-2">Importar Reporte TXT (Formato Oficial)</label>
-                    <div className="bg-white dark:bg-zinc-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 shadow-sm flex items-center justify-center border-dashed border-2 hover:border-primary transition-colors">
-                        {txtProcessing ? (
-                            <div className="flex flex-col items-center gap-2">
-                                <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
-                                <span className="text-xs text-gray-500">Procesando TXT...</span>
+            <h3 className="text-sm font-bold text-gray-400 uppercase mb-4">Reportes Compartidos (Nube)</h3>
+            <div className="space-y-3">
+                {sharedReports.map(report => (
+                    <div key={report.id} className="bg-white p-4 rounded-xl border flex items-center justify-between shadow-sm">
+                        <div className="flex items-center gap-3 min-w-0">
+                            <span className="material-symbols-outlined text-azul-header">cloud_done</span>
+                            <div className="truncate">
+                                <p className="font-bold text-sm truncate">{report.fileName}</p>
+                                <p className="text-[10px] text-gray-400">De: @{report.generatedBy} • {report.program}</p>
                             </div>
-                        ) : (
-                            <label className="cursor-pointer flex flex-col items-center gap-2 group w-full">
-                                <span className="material-symbols-outlined text-4xl text-gray-300 group-hover:text-primary transition-colors">description</span>
-                                <span className="text-sm font-bold text-gray-500 group-hover:text-primary">Seleccionar Archivo(s) TXT</span>
-                                <input type="file" accept=".txt" multiple onChange={handleTxtUpload} className="hidden" />
-                            </label>
-                        )}
+                        </div>
+                        <div className="flex gap-2">
+                             <button onClick={() => setPreviewReport(report)} className="size-8 rounded bg-gray-100 text-gray-500 flex items-center justify-center"><span className="material-symbols-outlined text-sm">visibility</span></button>
+                             <button onClick={() => handleDownload(report)} className="size-8 rounded bg-azul-header text-white flex items-center justify-center"><span className="material-symbols-outlined text-sm">download</span></button>
+                        </div>
                     </div>
-                </div>
-
-                {/* Batches Button */}
-                <button 
-                    onClick={() => setShowLoadedBatches(true)}
-                    className="bg-gray-100 dark:bg-white/5 hover:bg-gray-200 text-gray-600 dark:text-gray-300 py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2 border border-gray-200 dark:border-white/10"
-                >
-                    <span className="material-symbols-outlined">history</span>
-                    Ver Producciones Cargadas ({loadedBatches.length})
-                </button>
+                ))}
+                {sharedReports.length === 0 && <p className="text-xs text-gray-400 text-center py-4 italic">No hay reportes compartidos aún.</p>}
             </div>
         </div>
-
-        <hr className="border-gray-200 dark:border-gray-700 mb-8"/>
-
-        {/* REPORTS DASHBOARD */}
-        <div>
-            <div className="flex items-center justify-between mb-6">
-                 <div className="flex items-center gap-3 text-green-700 dark:text-green-500">
-                    <span className="material-symbols-outlined text-3xl">summarize</span>
-                    <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Estadísticas</h2>
-                 </div>
-                 <button 
-                    onClick={handleOpenGlobalStats}
-                    className="bg-miel text-white text-xs font-bold px-3 py-2 rounded-lg flex items-center gap-1 hover:bg-yellow-600 shadow-sm"
-                >
-                    <span className="material-symbols-outlined text-sm">leaderboard</span>
-                    Consultar Reportes Globales
-                </button>
-            </div>
-
-             <div className="bg-white dark:bg-zinc-800 p-6 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm space-y-4">
-                 <div>
-                    <label className="block text-xs font-bold text-gray-500 mb-2 uppercase tracking-wider">Filtrar Producción por Periodo</label>
-                    <div className="grid grid-cols-2 gap-4">
-                         <input type="date" value={reportStartDate} onChange={e => setReportStartDate(e.target.value)} className="w-full p-2 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-zinc-900"/>
-                         <input type="date" value={reportEndDate} onChange={e => setReportEndDate(e.target.value)} className="w-full p-2 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-zinc-900"/>
-                    </div>
-                </div>
-                 <div className="flex gap-3 mt-4">
-                    <button onClick={generateDocxReport} className="flex-1 bg-azul-header text-white py-3 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 hover:bg-opacity-90 transition-colors">
-                        <span className="material-symbols-outlined">description</span> Reporte (DOCX)
-                    </button>
-                    <button onClick={exportToCSV} className="flex-1 bg-green-600 text-white py-3 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 hover:bg-green-700 transition-colors">
-                        <span className="material-symbols-outlined">csv</span> Base Datos (CSV)
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        {/* LOADED BATCHES MODAL */}
-        {showLoadedBatches && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in" onClick={() => setShowLoadedBatches(false)}>
-                <div className="bg-white dark:bg-zinc-900 w-full max-w-lg rounded-2xl p-6 shadow-2xl flex flex-col h-[70vh]" onClick={e => e.stopPropagation()}>
-                    <div className="flex justify-between items-center mb-4 border-b border-gray-100 dark:border-white/10 pb-2">
-                         <h3 className="text-lg font-bold text-gray-800 dark:text-white">Lotes / Producciones TXT</h3>
-                         <button onClick={() => setShowLoadedBatches(false)} className="text-gray-400 hover:text-red-500"><span className="material-symbols-outlined">close</span></button>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 mb-4 text-xs">
-                        <select value={batchFilterProgram} onChange={e => setBatchFilterProgram(e.target.value)} className="p-2 border rounded dark:bg-zinc-800 dark:border-gray-700">
-                             <option value="">Todos los programas</option>
-                             {PROGRAMS_LIST.map(p => <option key={p} value={p}>{p}</option>)}
-                        </select>
-                        <input type="date" value={batchFilterDate} onChange={e => setBatchFilterDate(e.target.value)} className="p-2 border rounded dark:bg-zinc-800 dark:border-gray-700" />
-                    </div>
-
-                    <div className="flex-1 overflow-y-auto space-y-3">
-                        {filteredBatches.length === 0 ? (
-                            <p className="text-center text-gray-400 text-sm py-10">No hay lotes cargados (o no coinciden con el filtro)</p>
-                        ) : (
-                            filteredBatches.map(batch => (
-                                <div key={batch.id} className="bg-gray-50 dark:bg-white/5 p-3 rounded-lg border border-gray-200 dark:border-white/10 flex justify-between items-center">
-                                    <div>
-                                        <p className="font-bold text-sm text-gray-800 dark:text-white">{batch.program}</p>
-                                        <p className="text-xs text-gray-500">{batch.date} • {batch.count} pistas</p>
-                                    </div>
-                                    <button 
-                                        onClick={() => handleDeleteBatch(batch.id)}
-                                        className="text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 p-2 rounded-full transition-colors"
-                                        title="Eliminar este lote"
-                                    >
-                                        <span className="material-symbols-outlined text-lg">delete</span>
-                                    </button>
-                                </div>
-                            ))
-                        )}
-                    </div>
-                </div>
-            </div>
-        )}
-
-        {/* GLOBAL STATS MODAL */}
-        {showGlobalStats && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in" onClick={() => setShowGlobalStats(false)}>
-                <div className="bg-white dark:bg-zinc-900 w-full max-w-4xl h-[80vh] rounded-2xl p-6 flex flex-col" onClick={e => e.stopPropagation()}>
-                    <div className="flex justify-between items-center mb-6 border-b border-gray-200 dark:border-gray-700 pb-4">
-                        <h3 className="text-xl font-bold text-gray-900 dark:text-white">Tablero de Control de Reportes PDF</h3>
-                        <button onClick={() => setShowGlobalStats(false)} className="text-gray-400 hover:text-red-500"><span className="material-symbols-outlined">close</span></button>
-                    </div>
-                    
-                    <div className="flex-1 overflow-y-auto grid md:grid-cols-2 gap-6">
-                        {/* By Month */}
-                        <div className="bg-gray-50 dark:bg-white/5 p-4 rounded-xl">
-                            <h4 className="font-bold text-sm text-gray-700 dark:text-gray-300 mb-3 border-b border-gray-200 pb-2">Reportes por Mes</h4>
-                            <div className="space-y-2">
-                                {Object.entries(globalReports.reduce((acc, r) => {
-                                    const month = new Date(r.date).toLocaleString('es-ES', { month: 'long', year: 'numeric' });
-                                    if(!acc[month]) acc[month] = { count: 0, programs: new Set<string>() };
-                                    acc[month].count++;
-                                    acc[month].programs.add(r.program);
-                                    return acc;
-                                }, {} as Record<string, {count: number, programs: Set<string>}>)).map(([key, val]: [string, {count: number, programs: Set<string>}]) => (
-                                    <div key={key} className="flex justify-between text-xs">
-                                        <span className="capitalize font-medium">{key}</span>
-                                        <span className="text-gray-500">{val.count} reportes ({val.programs.size} programas)</span>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-
-                        {/* By Director */}
-                        <div className="bg-gray-50 dark:bg-white/5 p-4 rounded-xl">
-                            <h4 className="font-bold text-sm text-gray-700 dark:text-gray-300 mb-3 border-b border-gray-200 pb-2">Reportes por Director</h4>
-                            <div className="space-y-2">
-                                {Object.entries(globalReports.reduce((acc, r) => {
-                                    if(!acc[r.generatedBy]) acc[r.generatedBy] = { count: 0, programs: new Set<string>() };
-                                    acc[r.generatedBy].count++;
-                                    acc[r.generatedBy].programs.add(r.program);
-                                    return acc;
-                                }, {} as Record<string, {count: number, programs: Set<string>}>)).map(([key, val]: [string, {count: number, programs: Set<string>}]) => (
-                                    <div key={key} className="flex justify-between text-xs">
-                                        <span className="font-bold text-blue-600">{key}</span>
-                                        <span className="text-gray-500">{val.count} reportes ({Array.from(val.programs).length} progs)</span>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-
-                         {/* By Program */}
-                         <div className="bg-gray-50 dark:bg-white/5 p-4 rounded-xl md:col-span-2">
-                            <h4 className="font-bold text-sm text-gray-700 dark:text-gray-300 mb-3 border-b border-gray-200 pb-2">Detalle por Programa</h4>
-                            <div className="max-h-60 overflow-y-auto">
-                                <table className="w-full text-xs text-left">
-                                    <thead>
-                                        <tr className="text-gray-400">
-                                            <th className="pb-2">Programa</th>
-                                            <th className="pb-2 text-center">Cant. Reportes</th>
-                                            <th className="pb-2 text-right">Último Reporte</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {Object.entries(globalReports.reduce((acc, r) => {
-                                            if(!acc[r.program]) acc[r.program] = { count: 0, lastDate: r.date };
-                                            acc[r.program].count++;
-                                            if(new Date(r.date) > new Date(acc[r.program].lastDate)) acc[r.program].lastDate = r.date;
-                                            return acc;
-                                        }, {} as Record<string, {count: number, lastDate: string}>))
-                                        .sort((a: [string, {count: number, lastDate: string}], b: [string, {count: number, lastDate: string}]) => b[1].count - a[1].count)
-                                        .map(([key, val]: [string, {count: number, lastDate: string}]) => (
-                                            <tr key={key} className="border-b border-gray-100 dark:border-white/5">
-                                                <td className="py-2 font-medium">{key}</td>
-                                                <td className="py-2 text-center">{val.count}</td>
-                                                <td className="py-2 text-right">{new Date(val.lastDate).toLocaleDateString()}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
+        
+        {previewReport && (
+            <div className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-4" onClick={() => setPreviewReport(null)}>
+                <div className="bg-white rounded-2xl p-6 w-full max-w-sm text-center">
+                    <p className="font-bold mb-4">Vista Previa de Reporte en la Nube</p>
+                    <p className="text-xs text-gray-500 mb-6">Esta es una simulación del PDF subido por {previewReport.generatedBy}.</p>
+                    <button onClick={() => setPreviewReport(null)} className="bg-azul-header text-white px-6 py-2 rounded-xl font-bold">Cerrar</button>
                 </div>
             </div>
         )}
