@@ -91,8 +91,7 @@ export const saveReportToDB = async (report: Report): Promise<void> => {
     }
 };
 
-// Updated statusPartial type to include cloudUploaded to fix ReportsViewer error
-export const updateReportStatus = async (id: string, statusPartial: { downloaded?: boolean; sent?: boolean; cloudUploaded?: boolean }): Promise<void> => {
+export const updateReportStatus = async (id: string, statusPartial: { downloaded?: boolean; sent?: boolean }): Promise<void> => {
     try {
         const db = await openDB();
         return new Promise((resolve, reject) => {
@@ -105,8 +104,7 @@ export const updateReportStatus = async (id: string, statusPartial: { downloaded
                 if (report) {
                     report.status = { 
                         downloaded: statusPartial.downloaded ?? report.status?.downloaded ?? false,
-                        sent: statusPartial.sent ?? report.status?.sent ?? false,
-                        cloudUploaded: statusPartial.cloudUploaded ?? report.status?.cloudUploaded ?? false
+                        sent: statusPartial.sent ?? report.status?.sent ?? false
                     };
                     store.put(report);
                 }

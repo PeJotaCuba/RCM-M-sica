@@ -1,4 +1,5 @@
 
+
 export interface Track {
   id: string;
   filename: string;
@@ -19,6 +20,20 @@ export interface CreditInfo {
   genre?: string;
 }
 
+export interface ExportItem {
+  id: string;
+  title: string;
+  author: string;
+  authorCountry: string;
+  performer: string;
+  performerCountry: string;
+  genre: string;
+  source: string;
+  path: string;
+}
+
+export type SavedSelection = Track[];
+
 export interface User {
   username: string;
   password: string;
@@ -34,18 +49,6 @@ export interface ReportStatus {
     cloudUploaded?: boolean;
 }
 
-export interface ExportItem {
-    id: string;
-    title: string;
-    author: string;
-    authorCountry: string;
-    performer: string;
-    performerCountry: string;
-    genre: string;
-    source: 'db' | 'manual';
-    path?: string;
-}
-
 export interface Report {
     id: string;
     date: string;
@@ -55,14 +58,6 @@ export interface Report {
     pdfBlob: Blob; 
     items?: ExportItem[];
     status?: ReportStatus;
-}
-
-export interface SavedSelection {
-    id: string;
-    name: string;
-    date: string;
-    program: string;
-    tracks: Track[];
 }
 
 export enum ViewState {
