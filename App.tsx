@@ -132,6 +132,19 @@ const App: React.FC = () => {
       }
   };
 
+  const handleExportUsersDB = () => {
+      const dataStr = JSON.stringify(users, null, 2);
+      const blob = new Blob([dataStr], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = "musuarios.json";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+  };
+
   const handleAddCustomRoot = (name: string) => {
       const newRoots = [...customRoots, name];
       setCustomRoots(newRoots);
@@ -223,7 +236,6 @@ const App: React.FC = () => {
   };
 
   // Logic to handle saving an edited track.
-  // If we are in SELECTION view, we update the track in the selection list AND the main DB (as requested: "completar creditos faltantes")
   const handleSaveEdit = (updatedTrack: Track) => {
       updateTracks(prev => prev.map(t => t.id === updatedTrack.id ? updatedTrack : t));
       
@@ -251,22 +263,23 @@ const App: React.FC = () => {
         
         <header className="bg-azul-header text-white px-4 py-3 flex items-center justify-between shadow-md relative z-20 shrink-0">
             <button className="flex items-center gap-3" onClick={() => navigateTo(ViewState.LIST)}>
-                <div className="size-10 flex items-center justify-center bg-white rounded-full border-2 border-miel/40 shadow-inner">
-                    <svg viewBox="0 0 100 100" className="size-7">
-                        <circle cx="50" cy="50" r="45" fill="none" stroke="#d4a017" strokeWidth="4" />
-                        <path d="M40 35 L40 65 Q40 70 35 70 Q30 70 30 65 Q30 60 35 60 Q40 60 40 65" fill="#df4534" />
-                        <path d="M40 35 L65 30 L65 60 Q65 65 60 65 Q55 65 55 60 Q55 55 60 55 Q65 55 65 60" fill="#1a3a5f" />
-                    </svg>
+                <div className="size-10 flex items-center justify-center bg-white/10 rounded-full border-2 border-white/20">
+                    <span className="material-symbols-outlined text-2xl text-miel">radio</span>
                 </div>
                 <div className="text-left">
                     <h1 className="text-sm font-bold tracking-tight">RCM MÚSICA</h1>
-                    <span className="text-[8px] opacity-60 font-bold uppercase">Patrimonio Cultural</span>
+                    <span className="text-[8px] opacity-60 font-bold uppercase">Gestión Musical</span>
                 </div>
             </button>
             <div className="flex items-center gap-2">
                 <div className={`text-[8px] font-bold px-1.5 py-0.5 rounded uppercase ${authMode === 'admin' ? 'bg-miel' : 'bg-green-600'}`}>
                     {authMode === 'admin' ? 'COORDINADOR' : (authMode === 'director' ? 'DIRECTOR' : 'USUARIO')}
                 </div>
+                {authMode === 'admin' && (
+                    <button onClick={handleExportUsersDB} className="text-white/70 hover:text-white size-8 flex items-center justify-center bg-white/10 rounded-full transition-colors" title="Guardar BD Usuarios">
+                        <span className="material-symbols-outlined text-sm">save</span>
+                    </button>
+                )}
                 <button onClick={handleSyncData} className="text-white/70 hover:text-white size-8 flex items-center justify-center bg-white/10 rounded-full transition-colors" title="Sincronizar">
                     <span className={`material-symbols-outlined text-sm ${isUpdating ? 'animate-spin' : ''}`}>sync</span>
                 </button>
@@ -314,7 +327,7 @@ const App: React.FC = () => {
                 </div>
             )}
 
-            {view === ViewState.SETTINGS && authMode === 'admin' && <Settings tracks={tracks} users={users} onAddUser={() => {}} onEditUser={() => {}} onDeleteUser={() => {}} onExportUsers={() => {}} onImportUsers={() => {}} currentUser={currentUser} />}
+            {view === ViewState.SETTINGS && authMode === 'admin' && <Settings tracks={tracks} users={users} onAddUser={() => {}} onEditUser={() => {}} onDeleteUser={() => {}} onExportUsers={handleExportUsersDB} onImportUsers={() => {}} currentUser={currentUser} />}
             {view === ViewState.PRODUCTIONS && authMode === 'admin' && <Productions onUpdateTracks={updateTracks} allTracks={tracks} />}
             {view === ViewState.REPORTS && authMode !== 'admin' && <ReportsViewer onEdit={handleEditReport} currentUser={currentUser} />}
             {view === ViewState.GUIDE && authMode !== 'admin' && <Guide />}

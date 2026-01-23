@@ -31,7 +31,8 @@ interface TrackListProps {
   onOpenExportPreview?: () => void;
 }
 
-const FIXED_ROOTS = ['Música 1', 'Música 2', 'Música 3', 'Música 4', 'Música 5', 'Otros'];
+// REMOVED 'Otros' from FIXED_ROOTS as requested
+const FIXED_ROOTS = ['Música 1', 'Música 2', 'Música 3', 'Música 4', 'Música 5'];
 const ITEMS_PER_PAGE = 50;
 
 const TrackList: React.FC<TrackListProps> = ({ 
@@ -189,13 +190,7 @@ const TrackList: React.FC<TrackListProps> = ({
                     <input className="w-full pl-9 pr-3 py-2.5 rounded-lg border bg-gray-50 text-sm outline-none focus:border-primary transition-colors" placeholder={isSelectionView ? "Filtrar en selección..." : `Buscar en ${currentFolderName}...`} value={inputValue} onChange={(e) => setInputValue(e.target.value)} />
                  </div>
                  
-                 {/* Upload button only for Admin in Explorer */}
-                 {!isSelectionView && isAdmin && (
-                    <label className="bg-primary text-white size-10 flex items-center justify-center rounded-lg cursor-pointer hover:bg-primary-dark transition-colors shadow-sm">
-                        <span className="material-symbols-outlined">upload_file</span>
-                        <input type="file" multiple className="hidden" onChange={(e) => e.target.files && onUploadTxt(e.target.files, activeRoot)} />
-                    </label>
-                 )}
+                 {/* REMOVED: Red upload button with arrow */}
              </div>
 
              {/* Search Options (Global vs Local) */}
