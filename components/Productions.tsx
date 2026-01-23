@@ -1,6 +1,10 @@
 
 import React, { useEffect, useState } from 'react';
 import { Track, Report } from '../types';
+import * as XLSX from 'xlsx';
+
+// Mock shared reports location as requested
+const GITHUB_REPORTS_URL = 'https://github.com/PeJotaCuba/RCM-M-sica/tree/89cf9deefcaac20834f2c2b63e60921a0c5a322a/Reportes%20';
 
 interface ProductionsProps {
   onUpdateTracks: (updateFunc: (prev: Track[]) => Track[]) => void;
@@ -9,56 +13,87 @@ interface ProductionsProps {
 
 const Productions: React.FC<ProductionsProps> = ({ allTracks = [] }) => {
   const [sharedReports, setSharedReports] = useState<Report[]>([]);
-  const [previewReport, setPreviewReport] = useState<Report | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
       const loadShared = () => {
+          // Local simulation of fetching from shared reports store
           const shared = JSON.parse(localStorage.getItem('rcm_shared_reports') || '[]');
           setSharedReports(shared);
       };
       loadShared();
   }, []);
 
-  const handleDownload = (report: Report) => {
-      // Logic would normally fetch from Git, here we use the stored mock
-      alert(`Descargando: ${report.fileName}`);
+  const handleExportCSV = () => {
+    if (allTracks.length === 0) return alert("Base de datos vacía.");
+    const data = allTracks.map(t => ({
+      Título: t.metadata.title,
+      Autor: t.metadata.author,
+      Intérprete: t.metadata.performer,
+      Género: t.metadata.genre,
+      Año: t.metadata.year,
+      Ruta: t.path
+    }));
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "BaseDatos");
+    XLSX.writeFile(wb, "RCM_Backup_Musical.csv");
+  };
+
+  const handleGenerateDOCXReport = () => {
+    // Basic simulation as requested based on previous versions logic
+    alert("Iniciando exportación de informe consolidado DOCX...");
+    setTimeout(() => alert("Informe generado con éxito (Simulación DOCX)."), 1000);
+  };
+
+  const handleDownloadCloudReport = (report: Report) => {
+      const url = URL.createObjectURL(report.pdfBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `PM-Cloud-${report.fileName}`;
+      a.click();
+      alert(`Descargando reporte de ${report.generatedBy}`);
   };
 
   return (
     <div className="flex flex-col h-full bg-background-light p-6 overflow-y-auto pb-24">
-        <h2 className="text-2xl font-bold mb-6 flex items-center gap-2"><span className="material-symbols-outlined text-primary">playlist_add</span> Producciones</h2>
+        <h2 className="text-xl font-bold mb-6 flex items-center gap-2"><span className="material-symbols-outlined text-primary">playlist_add</span> Control de Producciones</h2>
 
-        <div className="mb-8">
-            <h3 className="text-sm font-bold text-gray-400 uppercase mb-4">Reportes Compartidos (Nube)</h3>
-            <div className="space-y-3">
-                {sharedReports.map(report => (
-                    <div key={report.id} className="bg-white p-4 rounded-xl border flex items-center justify-between shadow-sm">
-                        <div className="flex items-center gap-3 min-w-0">
-                            <span className="material-symbols-outlined text-azul-header">cloud_done</span>
-                            <div className="truncate">
-                                <p className="font-bold text-sm truncate">{report.fileName}</p>
-                                <p className="text-[10px] text-gray-400">De: @{report.generatedBy} • {report.program}</p>
-                            </div>
+        <div className="grid grid-cols-2 gap-3 mb-8">
+            <button onClick={handleExportCSV} className="bg-white border border-gray-200 p-4 rounded-2xl flex flex-col items-center justify-center gap-2 shadow-sm">
+                <span className="material-symbols-outlined text-green-600 text-3xl">database</span>
+                <span className="text-[10px] font-bold uppercase">Exportar CSV</span>
+            </button>
+            <button onClick={handleGenerateDOCXReport} className="bg-white border border-gray-200 p-4 rounded-2xl flex flex-col items-center justify-center gap-2 shadow-sm">
+                <span className="material-symbols-outlined text-blue-600 text-3xl">description</span>
+                <span className="text-[10px] font-bold uppercase">Informe DOCX</span>
+            </button>
+        </div>
+
+        <div className="flex items-center justify-between mb-4">
+            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">Reportes de Directores (GitHub)</h3>
+            <button onClick={() => window.open(GITHUB_REPORTS_URL)} className="text-[10px] text-blue-500 font-bold flex items-center gap-1">Ver Carpeta <span className="material-symbols-outlined text-sm">open_in_new</span></button>
+        </div>
+
+        <div className="space-y-3">
+            {sharedReports.map(report => (
+                <div key={report.id} className="bg-white p-4 rounded-xl border flex items-center justify-between shadow-sm">
+                    <div className="flex items-center gap-3 min-w-0">
+                        <div className="size-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                            <span className="material-symbols-outlined">cloud_download</span>
                         </div>
-                        <div className="flex gap-2">
-                             <button onClick={() => setPreviewReport(report)} className="size-8 rounded bg-gray-100 text-gray-500 flex items-center justify-center"><span className="material-symbols-outlined text-sm">visibility</span></button>
-                             <button onClick={() => handleDownload(report)} className="size-8 rounded bg-azul-header text-white flex items-center justify-center"><span className="material-symbols-outlined text-sm">download</span></button>
+                        <div className="truncate">
+                            <p className="font-bold text-xs truncate">{report.fileName}</p>
+                            <p className="text-[9px] text-gray-400">Enviado por: {report.generatedBy}</p>
                         </div>
                     </div>
-                ))}
-                {sharedReports.length === 0 && <p className="text-xs text-gray-400 text-center py-4 italic">No hay reportes compartidos aún.</p>}
-            </div>
-        </div>
-        
-        {previewReport && (
-            <div className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-4" onClick={() => setPreviewReport(null)}>
-                <div className="bg-white rounded-2xl p-6 w-full max-w-sm text-center">
-                    <p className="font-bold mb-4">Vista Previa de Reporte en la Nube</p>
-                    <p className="text-xs text-gray-500 mb-6">Esta es una simulación del PDF subido por {previewReport.generatedBy}.</p>
-                    <button onClick={() => setPreviewReport(null)} className="bg-azul-header text-white px-6 py-2 rounded-xl font-bold">Cerrar</button>
+                    <button onClick={() => handleDownloadCloudReport(report)} className="size-8 rounded-lg bg-azul-header text-white flex items-center justify-center">
+                         <span className="material-symbols-outlined text-sm">download</span>
+                    </button>
                 </div>
-            </div>
-        )}
+            ))}
+            {sharedReports.length === 0 && <div className="p-10 border-2 border-dashed rounded-2xl text-center text-gray-400 text-xs italic">Sincroniza para ver reportes compartidos.</div>}
+        </div>
     </div>
   );
 };
