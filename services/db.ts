@@ -1,10 +1,11 @@
 
-import { Track, Report } from '../types';
+import { Track, Report, Production } from '../types';
 
 const DB_NAME = 'RCM_Music_DB';
 const TRACKS_STORE = 'tracks';
 const REPORTS_STORE = 'reports';
-const DB_VERSION = 2; // Increment version to add new store
+const PRODUCTIONS_STORE = 'productions';
+const DB_VERSION = 3; // Increment version to add productions store
 
 const openDB = (): Promise<IDBDatabase> => {
     return new Promise((resolve, reject) => {
@@ -23,6 +24,9 @@ const openDB = (): Promise<IDBDatabase> => {
             }
             if (!db.objectStoreNames.contains(REPORTS_STORE)) {
                 db.createObjectStore(REPORTS_STORE, { keyPath: 'id' });
+            }
+            if (!db.objectStoreNames.contains(PRODUCTIONS_STORE)) {
+                db.createObjectStore(PRODUCTIONS_STORE, { keyPath: 'id' });
             }
         };
     });
@@ -148,6 +152,39 @@ export const deleteReportFromDB = async (id: string): Promise<void> => {
         store.delete(id);
         tx.oncomplete = () => resolve();
     });
+};
+
+// --- PRODUCTIONS OPERATIONS ---
+
+export const saveProductionToDB = async (production: Production): Promise<void> => {
+    try {
+        const db = await openDB();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(PRODUCTIONS_STORE, 'readwrite');
+            const store = tx.objectStore(PRODUCTIONS_STORE);
+            const request = store.put(production);
+            request.onsuccess = () => resolve();
+            request.onerror = () => reject(request.error);
+        });
+    } catch (error) {
+        console.error("Error guardando producción:", error);
+        throw error;
+    }
+};
+
+export const loadProductionsFromDB = async (): Promise<Production[]> => {
+    try {
+        const db = await openDB();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(PRODUCTIONS_STORE, 'readonly');
+            const store = tx.objectStore(PRODUCTIONS_STORE);
+            const request = store.getAll();
+            request.onsuccess = () => resolve(request.result || []);
+            request.onerror = () => reject(request.error);
+        });
+    } catch (error) {
+        return [];
+    }
 };
 
 export const clearTracksDB = async (): Promise<void> => {
