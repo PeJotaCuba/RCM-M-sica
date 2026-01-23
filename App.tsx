@@ -511,12 +511,14 @@ const App: React.FC = () => {
 
                     {/* Footer Actions */}
                     <div className="p-4 grid grid-cols-2 gap-3 bg-gray-50 border-t shrink-0">
-                        <button onClick={handleShareWhatsApp} className="bg-[#25D366] text-white py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 shadow-sm">
+                        <button onClick={handleShareWhatsApp} className={`bg-[#25D366] text-white py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 shadow-sm ${authMode === 'admin' ? 'col-span-2' : ''}`}>
                             <i className="material-symbols-outlined text-lg">chat</i> WhatsApp
                         </button>
-                        <button onClick={handleDownloadReport} className="bg-primary text-white py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 shadow-sm">
-                            <i className="material-symbols-outlined text-lg">picture_as_pdf</i> Generar PDF
-                        </button>
+                        {authMode !== 'admin' && (
+                            <button onClick={handleDownloadReport} className="bg-primary text-white py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 shadow-sm">
+                                <i className="material-symbols-outlined text-lg">picture_as_pdf</i> Generar PDF
+                            </button>
+                        )}
                     </div>
                 </div>
             </div>

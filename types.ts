@@ -39,6 +39,20 @@ export interface SavedSelection {
     tracks: Track[];
 }
 
+export interface Production {
+    id: string;
+    date: string;
+    program: string;
+    tracks: {
+        title: string;
+        author: string;
+        authorCountry: string;
+        performer: string;
+        performerCountry: string;
+        genre: string;
+    }[];
+}
+
 export interface User {
   username: string;
   password: string;
