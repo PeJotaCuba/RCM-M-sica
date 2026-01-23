@@ -31,7 +31,6 @@ interface TrackListProps {
   onOpenExportPreview?: () => void;
 }
 
-// REMOVED 'Otros' from FIXED_ROOTS as requested
 const FIXED_ROOTS = ['Música 1', 'Música 2', 'Música 3', 'Música 4', 'Música 5'];
 const ITEMS_PER_PAGE = 50;
 
@@ -70,8 +69,13 @@ const TrackList: React.FC<TrackListProps> = ({
 
   const handleRootClick = (root: string) => {
       if (activeRoot === root && !isSelectionView && isAdmin) {
-          setRenameInput(root);
-          setShowRenameModal(true);
+          // Double click logic replaced by long press or simple button click logic
+          // But here, if admin clicks active tab, we show rename modal? No, let's keep simple.
+          setActiveRoot(root);
+          setCurrentPath(''); 
+          setInputValue(''); 
+          setSearchQuery('');
+          setIsGlobalSearch(false);
       } else {
           setActiveRoot(root);
           setCurrentPath(''); 
@@ -105,7 +109,6 @@ const TrackList: React.FC<TrackListProps> = ({
   const normalizeStr = (str: string) => str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
   const displayItems = useMemo(() => {
-      // 1. Lógica para VISTA DE SELECCIÓN
       if (isSelectionView) {
           let list = tracks;
           if (searchQuery.trim()) {
@@ -115,7 +118,6 @@ const TrackList: React.FC<TrackListProps> = ({
           return list.map(t => ({ type: 'track' as const, data: t, key: t.id })).sort((a,b) => a.data.filename.localeCompare(b.data.filename));
       }
 
-      // 2. Lógica para VISTA DE EXPLORADOR
       const targetPath = currentPath || activeRoot;
       const targetPathNorm = normalizeStr(targetPath);
       const filesList: any[] = [];
@@ -123,7 +125,6 @@ const TrackList: React.FC<TrackListProps> = ({
       
       let pool = tracks;
 
-      // Si hay búsqueda activa
       if (searchQuery.trim()) {
           const cleanQuery = normalizeStr(searchQuery.trim());
           if (!isGlobalSearch) {
@@ -137,7 +138,6 @@ const TrackList: React.FC<TrackListProps> = ({
           return pool.map(t => ({ type: 'track' as const, data: t, key: t.id }));
       }
 
-      // Si no hay búsqueda, mostrar estructura de carpetas
       const relevantTracks = tracks.filter(t => t.path && normalizeStr(t.path).startsWith(targetPathNorm));
       
       for (const t of relevantTracks) {
@@ -182,6 +182,42 @@ const TrackList: React.FC<TrackListProps> = ({
             </div>
         )}
 
+        {/* ADMIN DATABASE CONTROLS */}
+        {!isSelectionView && isAdmin && (
+            <div className="flex gap-2 p-2 bg-gray-50 border-b border-gray-100 justify-center">
+                <button 
+                    onClick={() => onSyncRoot(activeRoot)} 
+                    className="flex items-center gap-1 bg-white border border-gray-200 px-3 py-1.5 rounded-lg shadow-sm text-[10px] font-bold text-gray-700 hover:bg-gray-100"
+                    title="Cargar base de datos desde la nube"
+                >
+                    <span className="material-symbols-outlined text-sm text-green-600">cloud_download</span> Actualizar
+                </button>
+                <button 
+                    onClick={() => onExportRoot(activeRoot)} 
+                    className="flex items-center gap-1 bg-white border border-gray-200 px-3 py-1.5 rounded-lg shadow-sm text-[10px] font-bold text-gray-700 hover:bg-gray-100"
+                    title="Descargar base de datos local"
+                >
+                    <span className="material-symbols-outlined text-sm text-blue-600">save</span> Guardar
+                </button>
+                <button 
+                    onClick={() => onClearRoot(activeRoot)} 
+                    className="flex items-center gap-1 bg-white border border-gray-200 px-3 py-1.5 rounded-lg shadow-sm text-[10px] font-bold text-gray-700 hover:bg-red-50 hover:text-red-600"
+                    title="Eliminar todos los datos de esta carpeta"
+                >
+                    <span className="material-symbols-outlined text-sm text-red-500">delete</span> Limpiar
+                </button>
+                {/* Specific Rename logic trigger for custom roots */}
+                {customRoots.includes(activeRoot) && (
+                    <button 
+                        onClick={() => { setRenameInput(activeRoot); setShowRenameModal(true); }}
+                        className="flex items-center gap-1 bg-white border border-gray-200 px-3 py-1.5 rounded-lg shadow-sm text-[10px] font-bold text-gray-700 hover:bg-gray-100"
+                    >
+                        <span className="material-symbols-outlined text-sm text-gray-500">edit</span>
+                    </button>
+                )}
+            </div>
+        )}
+
         {/* SEARCH BAR AREA */}
         <div className="px-4 py-3 flex flex-col gap-2">
              <div className="flex items-center gap-2">
@@ -189,8 +225,6 @@ const TrackList: React.FC<TrackListProps> = ({
                     <span className="material-symbols-outlined absolute left-2 top-2.5 text-gray-400 text-lg">search</span>
                     <input className="w-full pl-9 pr-3 py-2.5 rounded-lg border bg-gray-50 text-sm outline-none focus:border-primary transition-colors" placeholder={isSelectionView ? "Filtrar en selección..." : `Buscar en ${currentFolderName}...`} value={inputValue} onChange={(e) => setInputValue(e.target.value)} />
                  </div>
-                 
-                 {/* REMOVED: Red upload button with arrow */}
              </div>
 
              {/* Search Options (Global vs Local) */}

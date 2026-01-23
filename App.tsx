@@ -17,9 +17,20 @@ import { generateReportPDF } from './services/pdfService';
 const AUTH_KEY = 'rcm_auth_session';
 const USERS_KEY = 'rcm_users_db';
 const SELECTION_KEY = 'rcm_current_selection';
-const SAVED_SELECTIONS_KEY = 'rcm_saved_selections'; // Key for persistence
+const SAVED_SELECTIONS_KEY = 'rcm_saved_selections';
 const CUSTOM_ROOTS_KEY = 'rcm_custom_roots';
+
+// Configuration for Database URLs and Filenames
 const USERS_DB_URL = 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/musuarios.json';
+
+const ROOT_DB_CONFIG: Record<string, { url: string, filename: string }> = {
+    'Música 1': { url: 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/mdatos1.json', filename: 'mdatos1.json' },
+    'Música 2': { url: 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/mdatos2.json', filename: 'mdatos2.json' },
+    'Música 3': { url: 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/mdatos3.json', filename: 'mdatos3.json' },
+    'Música 4': { url: 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/mdatos4.json', filename: 'mdatos4.json' },
+    'Música 5': { url: 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/mdatos5.json', filename: 'mdatos5.json' },
+    'Otros':    { url: 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/motros.json', filename: 'motros.json' }
+};
 
 const DEFAULT_ADMIN: User = { 
     username: 'admin', 
@@ -88,19 +99,9 @@ const App: React.FC = () => {
     initApp();
   }, []);
 
-  // Persistence for current selection
-  useEffect(() => {
-    if (authMode) {
-      localStorage.setItem(SELECTION_KEY, JSON.stringify(selectedTracksList));
-    }
-  }, [selectedTracksList, authMode]);
-
-  // Persistence for saved selections
-  useEffect(() => {
-      if (authMode) {
-          localStorage.setItem(SAVED_SELECTIONS_KEY, JSON.stringify(savedSelections));
-      }
-  }, [savedSelections, authMode]);
+  // Persistence
+  useEffect(() => { if (authMode) localStorage.setItem(SELECTION_KEY, JSON.stringify(selectedTracksList)); }, [selectedTracksList, authMode]);
+  useEffect(() => { if (authMode) localStorage.setItem(SAVED_SELECTIONS_KEY, JSON.stringify(savedSelections)); }, [savedSelections, authMode]);
 
   useEffect(() => {
     const handlePopState = (event: PopStateEvent) => {
@@ -129,24 +130,53 @@ const App: React.FC = () => {
       localStorage.removeItem(AUTH_KEY); setAuthMode(null); setCurrentUser(null); setView(ViewState.LOGIN); setSelectedTrack(null);
   };
 
+  // --- SYNC & EXPORT HANDLERS ---
+
+  // 1. Sync Users & Custom Roots (musuarios.json)
   const handleSyncData = async () => {
       setIsUpdating(true);
       try {
           const r = await fetch(USERS_DB_URL);
-          const j = await r.json();
-          setUsers(j);
-          localStorage.setItem(USERS_KEY, JSON.stringify(j));
-          alert("Sincronización de usuarios y base de datos completada.");
+          const data = await r.json();
+          
+          let fetchedUsers: User[] = [];
+          let fetchedRoots: string[] = [];
+
+          if (Array.isArray(data)) {
+              // Legacy format: just users array
+              fetchedUsers = data;
+          } else if (data.users || data.customRoots) {
+              // New format: object with users and roots
+              fetchedUsers = data.users || [];
+              fetchedRoots = data.customRoots || [];
+          }
+
+          if (fetchedUsers.length > 0) {
+              setUsers(fetchedUsers);
+              localStorage.setItem(USERS_KEY, JSON.stringify(fetchedUsers));
+          }
+          
+          if (fetchedRoots.length > 0) {
+              setCustomRoots(fetchedRoots);
+              localStorage.setItem(CUSTOM_ROOTS_KEY, JSON.stringify(fetchedRoots));
+          }
+
+          alert("Sincronización de usuarios y carpetas completada.");
           window.location.reload(); 
       } catch(e) {
-          alert("Error al sincronizar.");
+          alert("Error al sincronizar usuarios.");
       } finally {
           setIsUpdating(false);
       }
   };
 
+  // 2. Export Users & Custom Roots (musuarios.json)
   const handleExportUsersDB = () => {
-      const dataStr = JSON.stringify(users, null, 2);
+      const exportData = {
+          users: users,
+          customRoots: customRoots
+      };
+      const dataStr = JSON.stringify(exportData, null, 2);
       const blob = new Blob([dataStr], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -157,6 +187,59 @@ const App: React.FC = () => {
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
   };
+
+  // 3. Folder Specific Handlers
+  const handleSyncRoot = async (rootName: string) => {
+      const config = ROOT_DB_CONFIG[rootName];
+      if (!config) return alert(`No hay configuración remota para ${rootName}`);
+      
+      setIsUpdating(true);
+      try {
+          const r = await fetch(config.url);
+          if (!r.ok) throw new Error("No se pudo descargar la base de datos.");
+          const newTracks: Track[] = await r.json();
+
+          // Merge Logic: Remove old tracks from this root, add new ones
+          const otherTracks = tracks.filter(t => !t.path.startsWith(rootName));
+          // Ensure new tracks have the correct path prefix just in case, or trust the JSON
+          const finalNewTracks = newTracks.map(t => ({...t, path: t.path.startsWith(rootName) ? t.path : `${rootName}/${t.path}`})); // Basic safety
+
+          await updateTracks([...otherTracks, ...newTracks]); // Assuming JSON has correct paths
+          alert(`Base de datos de ${rootName} actualizada (${newTracks.length} pistas).`);
+      } catch (e) {
+          alert(`Error al actualizar ${rootName}. Verifique la conexión.`);
+          console.error(e);
+      } finally {
+          setIsUpdating(false);
+      }
+  };
+
+  const handleExportRoot = (rootName: string) => {
+      const config = ROOT_DB_CONFIG[rootName];
+      // Filter tracks belonging to this root
+      const rootTracks = tracks.filter(t => t.path.startsWith(rootName));
+      if (rootTracks.length === 0) return alert(`No hay datos en ${rootName} para guardar.`);
+
+      const dataStr = JSON.stringify(rootTracks, null, 2);
+      const blob = new Blob([dataStr], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = config ? config.filename : `${rootName.replace(/\s+/g, '').toLowerCase()}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+  };
+
+  const handleClearRoot = async (rootName: string) => {
+      if (!window.confirm(`¿Está seguro de BORRAR todos los datos de ${rootName}?`)) return;
+      const remainingTracks = tracks.filter(t => !t.path.startsWith(rootName));
+      await updateTracks(remainingTracks);
+      alert(`Datos de ${rootName} eliminados.`);
+  };
+
+  // --- END HANDLERS ---
 
   const handleAddCustomRoot = (name: string) => {
       const newRoots = [...customRoots, name];
@@ -200,28 +283,21 @@ const App: React.FC = () => {
       } 
   };
 
-  // --- SAVED SELECTIONS LOGIC ---
-
   const handleSaveSelectionPersist = () => {
     if (selectedTracksList.length === 0) return alert("No hay temas seleccionados para guardar.");
-    
-    // Check Limit
     if (savedSelections.length >= 5) {
         return alert("Has alcanzado el límite de 5 selecciones guardadas. Por favor, elimina alguna antes de guardar una nueva.");
     }
-
     const name = window.prompt("Nombre para esta selección:");
     if (!name) return;
-
     const newSelection: SavedSelection = {
         id: `sel-${Date.now()}`,
         name: name.trim(),
         date: new Date().toISOString(),
         tracks: [...selectedTracksList]
     };
-
     setSavedSelections(prev => [newSelection, ...prev]);
-    setSelectedTracksList([]); // Auto-clear as requested
+    setSelectedTracksList([]); 
     localStorage.removeItem(SELECTION_KEY);
     alert("Selección guardada y panel limpiado.");
   };
@@ -230,11 +306,8 @@ const App: React.FC = () => {
       if (selectedTracksList.length > 0) {
           if (!window.confirm("Tienes temas seleccionados actualmente. ¿Deseas agregar la selección guardada a los actuales?")) return;
       }
-      
-      // Merge unique tracks
       const currentIds = new Set(selectedTracksList.map(t => t.id));
       const toAdd = sel.tracks.filter(t => !currentIds.has(t.id));
-      
       setSelectedTracksList(prev => [...prev, ...toAdd]);
       alert(`${toAdd.length} temas cargados de "${sel.name}".`);
   };
@@ -244,8 +317,6 @@ const App: React.FC = () => {
           setSavedSelections(prev => prev.filter(s => s.id !== id));
       }
   };
-
-  // --- END SAVED SELECTIONS LOGIC ---
 
   const handleProcessWishlist = () => {
       if (!wishlistText.trim()) return;
@@ -264,7 +335,6 @@ const App: React.FC = () => {
 
   const handleOpenExportModal = () => {
       setEditingReportId(null);
-      // Map selection to Export Items, handling default empty values
       const items: ExportItem[] = selectedTracksList.map(t => ({ 
           id: t.id, 
           title: t.metadata.title, 
@@ -288,7 +358,6 @@ const App: React.FC = () => {
 
   const handleShareWhatsApp = () => {
       let message = `*CRÉDITOS RCM*\n*Programa:* ${programName}\n\n`;
-      // Use edited exportItems for the message
       exportItems.forEach(item => { 
           message += `🎵 *${item.title}* - ${item.performer}\n📂 _${item.path || 'Manual'}_\n\n`; 
       });
@@ -305,10 +374,8 @@ const App: React.FC = () => {
       setShowExportModal(false);
   };
 
-  // Logic to handle saving an edited track.
   const handleSaveEdit = (updatedTrack: Track) => {
       updateTracks(prev => prev.map(t => t.id === updatedTrack.id ? updatedTrack : t));
-      
       if (view === ViewState.SELECTION) {
            setSelectedTracksList(prev => prev.map(t => t.id === updatedTrack.id ? updatedTrack : t));
       }
@@ -331,7 +398,6 @@ const App: React.FC = () => {
   return (
     <div className="max-w-md mx-auto h-[100dvh] bg-gray-100 shadow-2xl overflow-hidden relative border-x border-gray-200 flex flex-col font-display">
         
-        {/* Datalists for global usage in inputs */}
         <datalist id="genre-options">
             {GENRES_LIST.map(g => <option key={g} value={g} />)}
         </datalist>
@@ -371,7 +437,7 @@ const App: React.FC = () => {
             {view === ViewState.LIST && (
                 <TrackList 
                     tracks={tracks} onSelectTrack={handleSelectTrack} onUploadTxt={handleUploadMultipleTxt} isAdmin={authMode === 'admin'} 
-                    onSyncRoot={() => {}} onExportRoot={() => {}} onClearRoot={() => {}} 
+                    onSyncRoot={handleSyncRoot} onExportRoot={handleExportRoot} onClearRoot={handleClearRoot} 
                     customRoots={customRoots} onAddCustomRoot={handleAddCustomRoot} onRenameRoot={handleRenameRoot}
                     selectedTrackIds={new Set(selectedTracksList.map(t => t.id))} onToggleSelection={handleToggleSelection}
                 />
@@ -387,7 +453,6 @@ const App: React.FC = () => {
                          </div>
                     </div>
                     
-                    {/* SAVED SELECTIONS AREA */}
                     {savedSelections.length > 0 && (
                         <div className="bg-white border-b border-gray-100 p-2">
                             <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-2 mb-2">Guardadas ({savedSelections.length}/5)</p>
@@ -456,7 +521,6 @@ const App: React.FC = () => {
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setShowExportModal(false)}>
                 <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl flex flex-col h-[85vh]" onClick={e => e.stopPropagation()}>
                     
-                    {/* Header */}
                     <div className="flex justify-between items-center p-4 border-b shrink-0">
                         <div>
                             <h3 className="font-bold text-gray-900">Exportar Selección</h3>
@@ -465,7 +529,6 @@ const App: React.FC = () => {
                         <button onClick={() => setShowExportModal(false)}><span className="material-symbols-outlined text-gray-400">close</span></button>
                     </div>
 
-                    {/* Program Selector */}
                     <div className="p-4 bg-gray-50 border-b shrink-0">
                         <label className="text-xs font-bold text-gray-500 block mb-1">Programa</label>
                         <select value={programName} onChange={e => setProgramName(e.target.value)} className="w-full p-2 border rounded bg-white text-sm outline-none">
@@ -473,7 +536,6 @@ const App: React.FC = () => {
                         </select>
                     </div>
 
-                    {/* Editable Items List */}
                     <div className="flex-1 overflow-y-auto p-4 space-y-4">
                         {exportItems.map((item, idx) => (
                             <div key={item.id} className="p-4 border rounded-xl bg-white shadow-sm">
@@ -509,7 +571,6 @@ const App: React.FC = () => {
                         ))}
                     </div>
 
-                    {/* Footer Actions */}
                     <div className="p-4 grid grid-cols-2 gap-3 bg-gray-50 border-t shrink-0">
                         <button onClick={handleShareWhatsApp} className={`bg-[#25D366] text-white py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 shadow-sm ${authMode === 'admin' ? 'col-span-2' : ''}`}>
                             <i className="material-symbols-outlined text-lg">chat</i> WhatsApp
