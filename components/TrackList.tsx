@@ -292,12 +292,13 @@ const TrackList: React.FC<TrackListProps> = ({
                         </button>
                     ))}
                 </div>
+                <button onClick={() => scrollTabs('right')} className="px-1 text-white/70 hover:text-white"><span className="material-symbols-outlined text-sm">chevron_right</span></button>
+                
                 {isAdmin && (
-                    <button onClick={() => setShowAddRootModal(true)} className="px-3 py-4 text-miel hover:text-white transition-colors" title="Nueva Carpeta">
+                    <button onClick={() => setShowAddRootModal(true)} className="px-3 py-4 text-miel hover:text-white transition-colors border-l border-white/10" title="Nueva Carpeta">
                         <span className="material-symbols-outlined">add_circle</span>
                     </button>
                 )}
-                <button onClick={() => scrollTabs('right')} className="px-1 text-white/70 hover:text-white"><span className="material-symbols-outlined text-sm">chevron_right</span></button>
             </div>
         )}
 
@@ -307,7 +308,7 @@ const TrackList: React.FC<TrackListProps> = ({
                 {/* Visible for EVERYONE */}
                 <button 
                     onClick={() => onSyncRoot(activeRoot)} 
-                    className="flex items-center gap-2 bg-white border border-gray-200 px-4 py-2 rounded-lg shadow-sm text-xs font-bold text-gray-700 hover:bg-gray-100 transition-all active:scale-95"
+                    className="flex items-center gap-2 bg-white border border-gray-200 px-5 py-2.5 rounded-lg shadow-sm text-sm font-bold text-gray-700 hover:bg-gray-100 transition-all active:scale-95"
                     title="Cargar base de datos desde la nube"
                 >
                     <span className="material-symbols-outlined text-lg text-green-600">cloud_download</span> 
@@ -319,7 +320,7 @@ const TrackList: React.FC<TrackListProps> = ({
                     <>
                         <button 
                             onClick={() => onExportRoot(activeRoot)} 
-                            className="flex items-center gap-2 bg-white border border-gray-200 px-4 py-2 rounded-lg shadow-sm text-xs font-bold text-gray-700 hover:bg-gray-100 transition-all active:scale-95"
+                            className="flex items-center gap-2 bg-white border border-gray-200 px-5 py-2.5 rounded-lg shadow-sm text-sm font-bold text-gray-700 hover:bg-gray-100 transition-all active:scale-95"
                             title="Descargar base de datos local"
                         >
                             <span className="material-symbols-outlined text-lg text-blue-600">save</span> 
@@ -327,7 +328,7 @@ const TrackList: React.FC<TrackListProps> = ({
                         </button>
                         <button 
                             onClick={() => onClearRoot(activeRoot)} 
-                            className="flex items-center gap-2 bg-white border border-gray-200 px-4 py-2 rounded-lg shadow-sm text-xs font-bold text-gray-700 hover:bg-red-50 hover:text-red-600 transition-all active:scale-95"
+                            className="flex items-center gap-2 bg-white border border-gray-200 px-5 py-2.5 rounded-lg shadow-sm text-sm font-bold text-gray-700 hover:bg-red-50 hover:text-red-600 transition-all active:scale-95"
                             title="Eliminar todos los datos de esta carpeta"
                         >
                             <span className="material-symbols-outlined text-lg text-red-500">delete</span> 
@@ -336,7 +337,7 @@ const TrackList: React.FC<TrackListProps> = ({
                         {customRoots.includes(activeRoot) && (
                             <button 
                                 onClick={() => { setRenameInput(activeRoot); setShowRenameModal(true); }}
-                                className="flex items-center gap-2 bg-white border border-gray-200 px-4 py-2 rounded-lg shadow-sm text-xs font-bold text-gray-700 hover:bg-gray-100 transition-all active:scale-95"
+                                className="flex items-center gap-2 bg-white border border-gray-200 px-5 py-2.5 rounded-lg shadow-sm text-sm font-bold text-gray-700 hover:bg-gray-100 transition-all active:scale-95"
                             >
                                 <span className="material-symbols-outlined text-lg text-gray-500">edit</span>
                             </button>

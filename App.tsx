@@ -585,6 +585,22 @@ const App: React.FC = () => {
             </div>
         )}
 
+        {/* GLOBAL LOADING OVERLAY */}
+        {isUpdating && (
+            <div className="absolute inset-0 z-[100] bg-black/40 backdrop-blur-[2px] flex items-center justify-center">
+                <div className="bg-white dark:bg-zinc-900 p-6 rounded-2xl shadow-2xl flex flex-col items-center gap-3 animate-fade-in">
+                    <div className="relative size-12">
+                        <svg className="animate-spin size-12 text-gray-200" viewBox="0 0 24 24"></svg> 
+                        <div className="absolute inset-0 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+                    </div>
+                    <div className="text-center">
+                        <h4 className="font-bold text-gray-800 dark:text-white">Actualizando</h4>
+                        <p className="text-xs text-gray-500">Por favor espere...</p>
+                    </div>
+                </div>
+            </div>
+        )}
+
         <nav className="bg-white border-t border-gray-200 h-20 px-4 flex items-center justify-between pb-2 z-20 shrink-0">
             <NavButton icon="folder_open" label="Explorar" active={view === ViewState.LIST} onClick={() => navigateTo(ViewState.LIST)} />
             <NavButton icon="checklist" label="Selección" active={view === ViewState.SELECTION} onClick={() => navigateTo(ViewState.SELECTION)} />
