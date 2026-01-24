@@ -81,6 +81,101 @@ const Productions: React.FC<ProductionsProps> = ({ }) => {
       }
   };
 
+  // TXT IMPORT LOGIC
+  const handleImportTxt = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (!e.target.files || e.target.files.length === 0) return;
+      const file = e.target.files[0];
+      const text = await file.text();
+      
+      const lines = text.split('\n');
+      let parsedDate = '';
+      let parsedProgram = '';
+      const parsedTracks: TempTrack[] = [];
+      let current: Partial<TempTrack> = {};
+
+      const saveCurrent = () => {
+          if (current.title && current.author && current.performer) {
+               parsedTracks.push({
+                   id: `imp-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+                   title: current.title,
+                   author: current.author,
+                   authorCountry: current.authorCountry || '',
+                   performer: current.performer,
+                   performerCountry: current.performerCountry || '',
+                   genre: current.genre || ''
+               } as TempTrack);
+          }
+          current = {};
+      };
+
+      lines.forEach(line => {
+          const l = line.trim();
+          if (!l) return;
+          const lower = l.toLowerCase();
+
+          if (lower.startsWith('fecha:')) {
+              let d = l.substring(6).trim();
+              // Try to convert DD/MM/YYYY to YYYY-MM-DD for date input compatibility
+              if (d.includes('/')) {
+                  const parts = d.split('/');
+                  if (parts.length === 3) d = `${parts[2]}-${parts[1]}-${parts[0]}`;
+              }
+              parsedDate = d;
+          } else if (lower.startsWith('programa:')) {
+              parsedProgram = l.substring(9).trim();
+          } else if (/\d+\.\s*titulo:/.test(lower) || lower.startsWith('titulo:')) {
+              saveCurrent();
+              const val = l.replace(/^\d+\.\s*/, '').replace(/^titulo:\s*/i, '').trim();
+              current.title = val;
+          } else if (lower.startsWith('autor:')) {
+              current.author = l.substring(6).trim();
+          } else if (lower.startsWith('intérprete:') || lower.startsWith('interprete:')) {
+               current.performer = l.substring(l.indexOf(':') + 1).trim();
+          } else if (lower.startsWith('país:') || lower.startsWith('pais:')) {
+               const val = l.substring(5).trim();
+               // Heuristic: If performer is already set, this country likely belongs to performer. 
+               // Otherwise, it belongs to author.
+               if (current.performer) {
+                   current.performerCountry = val;
+               } else {
+                   current.authorCountry = val;
+               }
+          } else if (lower.startsWith('género:') || lower.startsWith('genero:')) {
+               current.genre = l.substring(l.indexOf(':') + 1).trim();
+          }
+      });
+      saveCurrent();
+
+      if (parsedTracks.length === 0) {
+          alert("No se encontraron temas válidos en el archivo TXT.");
+          e.target.value = '';
+          return;
+      }
+
+      // Save directly to DB
+      const newProd: Production = {
+          id: `prod-${Date.now()}`,
+          date: parsedDate || new Date().toISOString().split('T')[0],
+          program: parsedProgram || 'Sin Nombre',
+          tracks: parsedTracks
+      };
+
+      try {
+          await saveProductionToDB(newProd);
+          alert(`Producción "${newProd.program}" importada y guardada con ${parsedTracks.length} temas.`);
+          // Update UI state just in case user wants to see it immediately (optional, or just clear)
+          setDate(newProd.date);
+          setProgram(newProd.program);
+          // We don't necessarily load them into sessionTracks to avoid duplication if they save again, 
+          // but we could just clear session.
+          setSessionTracks([]); 
+      } catch (err) {
+          alert("Error guardando la producción importada.");
+          console.error(err);
+      }
+      e.target.value = ''; 
+  };
+
   const handleExportHistoryCSV = async () => {
       const history = await loadProductionsFromDB();
       if (history.length === 0) return alert("No hay historial de producciones.");
@@ -254,6 +349,12 @@ const Productions: React.FC<ProductionsProps> = ({ }) => {
 
         {/* ACTIONS */}
         <div className="flex flex-col gap-3">
+             {/* TXT UPLOAD BUTTON */}
+             <label className="w-full bg-gray-100 border border-gray-300 text-gray-700 font-bold py-3 rounded-xl shadow-sm hover:bg-gray-200 flex items-center justify-center gap-2 cursor-pointer transition-colors">
+                <span className="material-symbols-outlined text-gray-600">upload_file</span> Cargar Producción desde TXT
+                <input type="file" accept=".txt" onChange={handleImportTxt} className="hidden" />
+             </label>
+
              <button onClick={handleSaveProduction} className="w-full bg-green-600 text-white font-bold py-3 rounded-xl shadow-md hover:bg-green-700 flex items-center justify-center gap-2">
                 <span className="material-symbols-outlined">save</span> Guardar Producción (DB)
              </button>

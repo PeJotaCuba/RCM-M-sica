@@ -184,35 +184,36 @@ const TrackList: React.FC<TrackListProps> = ({
 
         {/* ADMIN DATABASE CONTROLS */}
         {!isSelectionView && isAdmin && (
-            <div className="flex gap-2 p-2 bg-gray-50 border-b border-gray-100 justify-center">
+            <div className="flex gap-3 p-3 bg-gray-50 border-b border-gray-100 justify-center">
                 <button 
                     onClick={() => onSyncRoot(activeRoot)} 
-                    className="flex items-center gap-1 bg-white border border-gray-200 px-3 py-1.5 rounded-lg shadow-sm text-[10px] font-bold text-gray-700 hover:bg-gray-100"
+                    className="flex items-center gap-2 bg-white border border-gray-200 px-6 py-2.5 rounded-xl shadow-sm text-xs font-bold text-gray-700 hover:bg-gray-100 transition-all hover:shadow-md"
                     title="Cargar base de datos desde la nube"
                 >
-                    <span className="material-symbols-outlined text-sm text-green-600">cloud_download</span> Actualizar
+                    <span className="material-symbols-outlined text-lg text-green-600">cloud_download</span> Actualizar
                 </button>
                 <button 
                     onClick={() => onExportRoot(activeRoot)} 
-                    className="flex items-center gap-1 bg-white border border-gray-200 px-3 py-1.5 rounded-lg shadow-sm text-[10px] font-bold text-gray-700 hover:bg-gray-100"
+                    className="flex items-center gap-2 bg-white border border-gray-200 px-6 py-2.5 rounded-xl shadow-sm text-xs font-bold text-gray-700 hover:bg-gray-100 transition-all hover:shadow-md"
                     title="Descargar base de datos local"
                 >
-                    <span className="material-symbols-outlined text-sm text-blue-600">save</span> Guardar
+                    <span className="material-symbols-outlined text-lg text-blue-600">save</span> Guardar
                 </button>
                 <button 
                     onClick={() => onClearRoot(activeRoot)} 
-                    className="flex items-center gap-1 bg-white border border-gray-200 px-3 py-1.5 rounded-lg shadow-sm text-[10px] font-bold text-gray-700 hover:bg-red-50 hover:text-red-600"
+                    className="flex items-center gap-2 bg-white border border-gray-200 px-6 py-2.5 rounded-xl shadow-sm text-xs font-bold text-gray-700 hover:bg-red-50 hover:text-red-600 transition-all hover:shadow-md"
                     title="Eliminar todos los datos de esta carpeta"
                 >
-                    <span className="material-symbols-outlined text-sm text-red-500">delete</span> Limpiar
+                    <span className="material-symbols-outlined text-lg text-red-500">delete</span> Limpiar
                 </button>
+                
                 {/* Specific Rename logic trigger for custom roots */}
                 {customRoots.includes(activeRoot) && (
                     <button 
                         onClick={() => { setRenameInput(activeRoot); setShowRenameModal(true); }}
-                        className="flex items-center gap-1 bg-white border border-gray-200 px-3 py-1.5 rounded-lg shadow-sm text-[10px] font-bold text-gray-700 hover:bg-gray-100"
+                        className="flex items-center gap-1 bg-white border border-gray-200 px-4 py-2.5 rounded-xl shadow-sm text-xs font-bold text-gray-700 hover:bg-gray-100 transition-all"
                     >
-                        <span className="material-symbols-outlined text-sm text-gray-500">edit</span>
+                        <span className="material-symbols-outlined text-lg text-gray-500">edit</span>
                     </button>
                 )}
             </div>
