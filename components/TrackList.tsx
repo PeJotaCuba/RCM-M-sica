@@ -93,8 +93,9 @@ const TrackList: React.FC<TrackListProps> = ({
       if (!term.trim()) return;
       const clean = term.trim();
       setRecentSearches(prev => {
+          // Remove duplicates and keep top 10
           const filtered = prev.filter(i => i.term.toLowerCase() !== clean.toLowerCase());
-          const next = [{term: clean, time: Date.now()}, ...filtered].slice(0, 5); // Limit to 5 items
+          const next = [{term: clean, time: Date.now()}, ...filtered].slice(0, 10);
           localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
           return next;
       });
@@ -111,21 +112,18 @@ const TrackList: React.FC<TrackListProps> = ({
       setShowHistory(false);
   };
 
+  // Main Navigation Logic
   const handleNavigate = (item: any) => {
-      // Save search to history if we are in search mode
+      // 1. If searching, save to history
       if (searchQuery) addToHistory(searchQuery);
 
       if (item.type === 'track') {
           onSelectTrack(item.data);
       } else {
-          // Folder Logic
+          // 2. Folder Navigation Logic
           const targetPath = item.fullPath;
           
-          // Identify root from the path (e.g. "Música 4/Infantil" -> root "Música 4")
-          // Note: Our path structure usually starts with the Root Name.
-          // If we are in Global Search, we might be clicking a folder in a different root.
-          
-          // Check if path starts with any known root
+          // Determine which root this folder belongs to
           let newRoot = activeRoot;
           for (const r of allRoots) {
               if (targetPath.startsWith(r)) {
@@ -134,10 +132,11 @@ const TrackList: React.FC<TrackListProps> = ({
               }
           }
 
+          // 3. Switch Context
           setActiveRoot(newRoot);
           setCurrentPath(targetPath);
           
-          // Clear search to show contents of that folder
+          // 4. Clear Search so we enter the folder view
           setInputValue('');
           setSearchQuery('');
           setIsGlobalSearch(false);
@@ -183,6 +182,13 @@ const TrackList: React.FC<TrackListProps> = ({
 
   const normalizeStr = (str: string) => str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
+  // Filter history suggestions based on input
+  const filteredHistory = useMemo(() => {
+      if (!inputValue) return recentSearches;
+      const cleanInput = normalizeStr(inputValue);
+      return recentSearches.filter(i => normalizeStr(i.term).includes(cleanInput));
+  }, [recentSearches, inputValue]);
+
   const displayItems = useMemo(() => {
       if (isSelectionView) {
           let list = tracks;
@@ -207,12 +213,14 @@ const TrackList: React.FC<TrackListProps> = ({
               pool = pool.filter(t => normalizeStr(t.path).startsWith(targetPathNorm));
           }
 
+          // Search files
           const matchedFiles = pool.filter(t => 
               normalizeStr(t.filename).includes(cleanQuery) || 
               normalizeStr(t.metadata.title).includes(cleanQuery) || 
               normalizeStr(t.metadata.performer).includes(cleanQuery)
           ).map(t => ({ type: 'track' as const, data: t, key: t.id }));
 
+          // Search folders
           const matchedFolders: any[] = [];
           const seenFolders = new Set<string>();
 
@@ -238,7 +246,7 @@ const TrackList: React.FC<TrackListProps> = ({
                           matchedFolders.push({
                               type: 'folder' as const,
                               name: part,
-                              fullPath: currentPathBuild, // Ensure this path matches the 'path' structure in Track
+                              fullPath: currentPathBuild,
                               key: currentPathBuild
                           });
                       }
@@ -352,11 +360,13 @@ const TrackList: React.FC<TrackListProps> = ({
                         </button>
                     )}
 
-                    {/* SEARCH HISTORY DROPDOWN */}
-                    {showHistory && recentSearches.length > 0 && !inputValue && (
+                    {/* SEARCH HISTORY & SUGGESTIONS */}
+                    {showHistory && filteredHistory.length > 0 && (
                         <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-zinc-800 rounded-lg shadow-xl border border-gray-100 dark:border-white/10 z-50 overflow-hidden">
-                            <p className="text-[10px] text-gray-400 uppercase font-bold px-3 py-2 bg-gray-50 dark:bg-white/5">Recientes (24h)</p>
-                            {recentSearches.map((item, idx) => (
+                            <p className="text-[10px] text-gray-400 uppercase font-bold px-3 py-2 bg-gray-50 dark:bg-white/5">
+                                {inputValue ? 'Sugerencias' : 'Recientes (24h)'}
+                            </p>
+                            {filteredHistory.map((item, idx) => (
                                 <button 
                                     key={idx}
                                     onMouseDown={() => handleHistoryItemClick(item.term)}
