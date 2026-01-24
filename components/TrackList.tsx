@@ -127,15 +127,58 @@ const TrackList: React.FC<TrackListProps> = ({
 
       if (searchQuery.trim()) {
           const cleanQuery = normalizeStr(searchQuery.trim());
+          
+          // 1. Filtrar por ubicación (Global o Local)
           if (!isGlobalSearch) {
               pool = pool.filter(t => normalizeStr(t.path).startsWith(targetPathNorm));
           }
-          pool = pool.filter(t => 
+
+          // 2. Buscar Archivos
+          const matchedFiles = pool.filter(t => 
               normalizeStr(t.filename).includes(cleanQuery) || 
               normalizeStr(t.metadata.title).includes(cleanQuery) || 
               normalizeStr(t.metadata.performer).includes(cleanQuery)
-          );
-          return pool.map(t => ({ type: 'track' as const, data: t, key: t.id }));
+          ).map(t => ({ type: 'track' as const, data: t, key: t.id }));
+
+          // 3. Buscar Carpetas
+          const matchedFolders: any[] = [];
+          const seenFolders = new Set<string>();
+
+          pool.forEach(t => {
+              // Obtenemos la ruta relativa para analizar los segmentos de carpeta
+              const pathParts = t.path.split('/'); 
+              let currentPathBuild = "";
+
+              pathParts.forEach((part, index) => {
+                  if (index === 0) { 
+                      currentPathBuild = part; 
+                      return; // Saltamos la raíz principal (ej: Música 1)
+                  }
+                  
+                  currentPathBuild += "/" + part;
+                  
+                  // Si el segmento (nombre carpeta) coincide con la búsqueda
+                  if (normalizeStr(part).includes(cleanQuery)) {
+                      // Verificar si está dentro del scope si no es global
+                      if (!isGlobalSearch) {
+                          if (!normalizeStr(currentPathBuild).startsWith(targetPathNorm)) return;
+                      }
+
+                      if (!seenFolders.has(currentPathBuild)) {
+                          seenFolders.add(currentPathBuild);
+                          matchedFolders.push({
+                              type: 'folder' as const,
+                              name: part,
+                              fullPath: currentPathBuild,
+                              key: currentPathBuild
+                          });
+                      }
+                  }
+              });
+          });
+
+          // Combinar Carpetas encontradas + Archivos encontrados
+          return [...matchedFolders, ...matchedFiles];
       }
 
       const relevantTracks = tracks.filter(t => t.path && normalizeStr(t.path).startsWith(targetPathNorm));
@@ -184,36 +227,35 @@ const TrackList: React.FC<TrackListProps> = ({
 
         {/* ADMIN DATABASE CONTROLS */}
         {!isSelectionView && isAdmin && (
-            <div className="flex gap-3 p-3 bg-gray-50 border-b border-gray-100 justify-center">
+            <div className="flex gap-2 p-2 bg-gray-50 border-b border-gray-100 justify-center">
                 <button 
                     onClick={() => onSyncRoot(activeRoot)} 
-                    className="flex items-center gap-2 bg-white border border-gray-200 px-6 py-2.5 rounded-xl shadow-sm text-xs font-bold text-gray-700 hover:bg-gray-100 transition-all hover:shadow-md"
+                    className="flex items-center gap-1 bg-white border border-gray-200 px-3 py-1.5 rounded-lg shadow-sm text-[10px] font-bold text-gray-700 hover:bg-gray-100"
                     title="Cargar base de datos desde la nube"
                 >
-                    <span className="material-symbols-outlined text-lg text-green-600">cloud_download</span> Actualizar
+                    <span className="material-symbols-outlined text-sm text-green-600">cloud_download</span> Actualizar
                 </button>
                 <button 
                     onClick={() => onExportRoot(activeRoot)} 
-                    className="flex items-center gap-2 bg-white border border-gray-200 px-6 py-2.5 rounded-xl shadow-sm text-xs font-bold text-gray-700 hover:bg-gray-100 transition-all hover:shadow-md"
+                    className="flex items-center gap-1 bg-white border border-gray-200 px-3 py-1.5 rounded-lg shadow-sm text-[10px] font-bold text-gray-700 hover:bg-gray-100"
                     title="Descargar base de datos local"
                 >
-                    <span className="material-symbols-outlined text-lg text-blue-600">save</span> Guardar
+                    <span className="material-symbols-outlined text-sm text-blue-600">save</span> Guardar
                 </button>
                 <button 
                     onClick={() => onClearRoot(activeRoot)} 
-                    className="flex items-center gap-2 bg-white border border-gray-200 px-6 py-2.5 rounded-xl shadow-sm text-xs font-bold text-gray-700 hover:bg-red-50 hover:text-red-600 transition-all hover:shadow-md"
+                    className="flex items-center gap-1 bg-white border border-gray-200 px-3 py-1.5 rounded-lg shadow-sm text-[10px] font-bold text-gray-700 hover:bg-red-50 hover:text-red-600"
                     title="Eliminar todos los datos de esta carpeta"
                 >
-                    <span className="material-symbols-outlined text-lg text-red-500">delete</span> Limpiar
+                    <span className="material-symbols-outlined text-sm text-red-500">delete</span> Limpiar
                 </button>
-                
                 {/* Specific Rename logic trigger for custom roots */}
                 {customRoots.includes(activeRoot) && (
                     <button 
                         onClick={() => { setRenameInput(activeRoot); setShowRenameModal(true); }}
-                        className="flex items-center gap-1 bg-white border border-gray-200 px-4 py-2.5 rounded-xl shadow-sm text-xs font-bold text-gray-700 hover:bg-gray-100 transition-all"
+                        className="flex items-center gap-1 bg-white border border-gray-200 px-3 py-1.5 rounded-lg shadow-sm text-[10px] font-bold text-gray-700 hover:bg-gray-100"
                     >
-                        <span className="material-symbols-outlined text-lg text-gray-500">edit</span>
+                        <span className="material-symbols-outlined text-sm text-gray-500">edit</span>
                     </button>
                 )}
             </div>
@@ -253,7 +295,7 @@ const TrackList: React.FC<TrackListProps> = ({
             </div>
             <div className="flex flex-col flex-1 min-w-0" onClick={() => item.type === 'folder' ? setCurrentPath(item.fullPath) : onSelectTrack(item.data)}>
                 <p className="text-sm font-bold text-gray-800 dark:text-gray-200 truncate">{item.type === 'track' ? item.data.metadata.title : item.name}</p>
-                <p className="text-[10px] text-gray-400 truncate">{item.type === 'track' ? item.data.metadata.performer : 'Directorio'}</p>
+                <p className="text-[10px] text-gray-400 truncate">{item.type === 'track' ? item.data.metadata.performer : (item.type === 'folder' ? 'Directorio' : '')}</p>
             </div>
             
             {item.type === 'track' && onToggleSelection && (
@@ -278,6 +320,19 @@ const TrackList: React.FC<TrackListProps> = ({
              <div className="p-4 flex justify-center">
                  <button onClick={() => setRenderLimit(prev => prev + 50)} className="text-xs font-bold text-azul-header hover:underline">Cargar más...</button>
              </div>
+        )}
+
+        {/* ADMIN UPLOAD AREA AT BOTTOM */}
+        {!isSelectionView && isAdmin && (
+            <div className="p-4 border-t border-gray-100 bg-gray-50/50 mt-4">
+                <label className="flex flex-col items-center justify-center gap-2 bg-white border-2 border-dashed border-gray-300 rounded-xl p-6 cursor-pointer hover:bg-gray-50 hover:border-primary transition-colors">
+                    <span className="material-symbols-outlined text-gray-400 text-3xl">upload_file</span>
+                    <span className="text-xs font-bold text-gray-600 text-center">
+                        Cargar archivos TXT en <span className="text-primary">{activeRoot}</span>
+                    </span>
+                    <input type="file" multiple accept=".txt" className="hidden" onChange={(e) => onUploadTxt(e.target.files!, activeRoot)} />
+                </label>
+            </div>
         )}
       </div>
 

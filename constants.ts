@@ -100,12 +100,12 @@ export const parseTxtDatabase = (text: string, rootContext: string = 'Importado'
                   const normFirst = normalizeKey(firstSegment);
                   
                   // Si el primer segmento es "Musica3" (o similar), lo cortamos.
-                  if (variations.includes(normFirst)) {
+                  if (variations.some(v => normFirst.includes(v) || v.includes(normFirst))) {
                       pathBody = cleanSegment.substring(firstSlashIndex + 1);
                   }
               } else {
                   // Caso borde: la ruta es solo "Musica3"
-                  if (variations.includes(normalizeKey(cleanSegment))) {
+                  if (variations.some(v => normalizeKey(cleanSegment).includes(v))) {
                       pathBody = ""; // Es la raíz misma
                   }
               }
