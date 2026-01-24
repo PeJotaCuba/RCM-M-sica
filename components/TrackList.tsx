@@ -33,6 +33,7 @@ interface TrackListProps {
 
 const FIXED_ROOTS = ['Música 1', 'Música 2', 'Música 3', 'Música 4', 'Música 5'];
 const ITEMS_PER_PAGE = 50;
+const HISTORY_KEY = 'rcm_search_history';
 
 const TrackList: React.FC<TrackListProps> = ({ 
     tracks, onSelectTrack, onUploadTxt, isAdmin, 
@@ -50,13 +51,34 @@ const TrackList: React.FC<TrackListProps> = ({
   const [renderLimit, setRenderLimit] = useState(ITEMS_PER_PAGE);
   const [isGlobalSearch, setIsGlobalSearch] = useState(false);
 
+  // History State
+  const [recentSearches, setRecentSearches] = useState<{term: string, time: number}[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+
   const [showAddRootModal, setShowAddRootModal] = useState(false);
   const [showRenameModal, setShowRenameModal] = useState(false);
   const [newNameInput, setNewNameInput] = useState('');
   const [renameInput, setRenameInput] = useState('');
 
   const tabsContainerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const allRoots = useMemo(() => [...FIXED_ROOTS, ...customRoots], [customRoots]);
+
+  // Load History on Mount
+  useEffect(() => {
+      try {
+          const raw = localStorage.getItem(HISTORY_KEY);
+          if (raw) {
+              const parsed = JSON.parse(raw);
+              const now = Date.now();
+              // Filter items older than 24 hours (86400000 ms)
+              const valid = parsed.filter((i: any) => (now - i.time) < 86400000);
+              setRecentSearches(valid);
+          }
+      } catch (e) {
+          console.error("Error loading search history", e);
+      }
+  }, []);
 
   useEffect(() => {
       const handler = setTimeout(() => { setSearchQuery(inputValue); }, 300);
@@ -67,10 +89,63 @@ const TrackList: React.FC<TrackListProps> = ({
       setRenderLimit(ITEMS_PER_PAGE);
   }, [searchQuery, activeRoot, currentPath]);
 
+  const addToHistory = (term: string) => {
+      if (!term.trim()) return;
+      const clean = term.trim();
+      setRecentSearches(prev => {
+          const filtered = prev.filter(i => i.term.toLowerCase() !== clean.toLowerCase());
+          const next = [{term: clean, time: Date.now()}, ...filtered].slice(0, 5); // Limit to 5 items
+          localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+          return next;
+      });
+  };
+
+  const handleClearSearch = () => {
+      setInputValue('');
+      setSearchQuery('');
+      inputRef.current?.focus();
+  };
+
+  const handleHistoryItemClick = (term: string) => {
+      setInputValue(term);
+      setShowHistory(false);
+  };
+
+  const handleNavigate = (item: any) => {
+      // Save search to history if we are in search mode
+      if (searchQuery) addToHistory(searchQuery);
+
+      if (item.type === 'track') {
+          onSelectTrack(item.data);
+      } else {
+          // Folder Logic
+          const targetPath = item.fullPath;
+          
+          // Identify root from the path (e.g. "Música 4/Infantil" -> root "Música 4")
+          // Note: Our path structure usually starts with the Root Name.
+          // If we are in Global Search, we might be clicking a folder in a different root.
+          
+          // Check if path starts with any known root
+          let newRoot = activeRoot;
+          for (const r of allRoots) {
+              if (targetPath.startsWith(r)) {
+                  newRoot = r;
+                  break;
+              }
+          }
+
+          setActiveRoot(newRoot);
+          setCurrentPath(targetPath);
+          
+          // Clear search to show contents of that folder
+          setInputValue('');
+          setSearchQuery('');
+          setIsGlobalSearch(false);
+      }
+  };
+
   const handleRootClick = (root: string) => {
       if (activeRoot === root && !isSelectionView && isAdmin) {
-          // Double click logic replaced by long press or simple button click logic
-          // But here, if admin clicks active tab, we show rename modal? No, let's keep simple.
           setActiveRoot(root);
           setCurrentPath(''); 
           setInputValue(''); 
@@ -128,38 +203,32 @@ const TrackList: React.FC<TrackListProps> = ({
       if (searchQuery.trim()) {
           const cleanQuery = normalizeStr(searchQuery.trim());
           
-          // 1. Filtrar por ubicación (Global o Local)
           if (!isGlobalSearch) {
               pool = pool.filter(t => normalizeStr(t.path).startsWith(targetPathNorm));
           }
 
-          // 2. Buscar Archivos
           const matchedFiles = pool.filter(t => 
               normalizeStr(t.filename).includes(cleanQuery) || 
               normalizeStr(t.metadata.title).includes(cleanQuery) || 
               normalizeStr(t.metadata.performer).includes(cleanQuery)
           ).map(t => ({ type: 'track' as const, data: t, key: t.id }));
 
-          // 3. Buscar Carpetas
           const matchedFolders: any[] = [];
           const seenFolders = new Set<string>();
 
           pool.forEach(t => {
-              // Obtenemos la ruta relativa para analizar los segmentos de carpeta
               const pathParts = t.path.split('/'); 
               let currentPathBuild = "";
 
               pathParts.forEach((part, index) => {
                   if (index === 0) { 
                       currentPathBuild = part; 
-                      return; // Saltamos la raíz principal (ej: Música 1)
+                      return; 
                   }
                   
                   currentPathBuild += "/" + part;
                   
-                  // Si el segmento (nombre carpeta) coincide con la búsqueda
                   if (normalizeStr(part).includes(cleanQuery)) {
-                      // Verificar si está dentro del scope si no es global
                       if (!isGlobalSearch) {
                           if (!normalizeStr(currentPathBuild).startsWith(targetPathNorm)) return;
                       }
@@ -169,7 +238,7 @@ const TrackList: React.FC<TrackListProps> = ({
                           matchedFolders.push({
                               type: 'folder' as const,
                               name: part,
-                              fullPath: currentPathBuild,
+                              fullPath: currentPathBuild, // Ensure this path matches the 'path' structure in Track
                               key: currentPathBuild
                           });
                       }
@@ -177,7 +246,6 @@ const TrackList: React.FC<TrackListProps> = ({
               });
           });
 
-          // Combinar Carpetas encontradas + Archivos encontrados
           return [...matchedFolders, ...matchedFiles];
       }
 
@@ -262,11 +330,44 @@ const TrackList: React.FC<TrackListProps> = ({
         )}
 
         {/* SEARCH BAR AREA */}
-        <div className="px-4 py-3 flex flex-col gap-2">
+        <div className="px-4 py-3 flex flex-col gap-2 relative">
              <div className="flex items-center gap-2">
                  <div className="relative flex-1">
                     <span className="material-symbols-outlined absolute left-2 top-2.5 text-gray-400 text-lg">search</span>
-                    <input className="w-full pl-9 pr-3 py-2.5 rounded-lg border bg-gray-50 text-sm outline-none focus:border-primary transition-colors" placeholder={isSelectionView ? "Filtrar en selección..." : `Buscar en ${currentFolderName}...`} value={inputValue} onChange={(e) => setInputValue(e.target.value)} />
+                    <input 
+                        ref={inputRef}
+                        className="w-full pl-9 pr-9 py-2.5 rounded-lg border bg-gray-50 text-sm outline-none focus:border-primary transition-colors" 
+                        placeholder={isSelectionView ? "Filtrar en selección..." : `Buscar en ${currentFolderName}...`} 
+                        value={inputValue} 
+                        onChange={(e) => setInputValue(e.target.value)} 
+                        onFocus={() => setShowHistory(true)}
+                        onBlur={() => setTimeout(() => setShowHistory(false), 200)}
+                    />
+                    {inputValue && (
+                        <button 
+                            onClick={handleClearSearch}
+                            className="absolute right-2 top-2.5 text-gray-400 hover:text-gray-600"
+                        >
+                            <span className="material-symbols-outlined text-lg">close</span>
+                        </button>
+                    )}
+
+                    {/* SEARCH HISTORY DROPDOWN */}
+                    {showHistory && recentSearches.length > 0 && !inputValue && (
+                        <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-zinc-800 rounded-lg shadow-xl border border-gray-100 dark:border-white/10 z-50 overflow-hidden">
+                            <p className="text-[10px] text-gray-400 uppercase font-bold px-3 py-2 bg-gray-50 dark:bg-white/5">Recientes (24h)</p>
+                            {recentSearches.map((item, idx) => (
+                                <button 
+                                    key={idx}
+                                    onMouseDown={() => handleHistoryItemClick(item.term)}
+                                    className="w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-blue-50 dark:hover:bg-white/10 flex items-center gap-2"
+                                >
+                                    <span className="material-symbols-outlined text-gray-400 text-sm">history</span>
+                                    {item.term}
+                                </button>
+                            ))}
+                        </div>
+                    )}
                  </div>
              </div>
 
@@ -290,10 +391,10 @@ const TrackList: React.FC<TrackListProps> = ({
       <div className="flex-1 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-800 pb-24 bg-white dark:bg-background-dark">
         {visibleItems.map(item => (
           <div key={item.key} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-white/5 transition-colors group cursor-pointer">
-            <div className={`flex items-center justify-center rounded-lg size-10 shrink-0 ${item.type === 'track' ? 'bg-orange-50 text-primary' : 'bg-blue-50 text-azul-header'}`} onClick={() => item.type === 'folder' ? setCurrentPath(item.fullPath) : onSelectTrack(item.data)}>
+            <div className={`flex items-center justify-center rounded-lg size-10 shrink-0 ${item.type === 'track' ? 'bg-orange-50 text-primary' : 'bg-blue-50 text-azul-header'}`} onClick={() => handleNavigate(item)}>
               <span className="material-symbols-outlined">{item.type === 'folder' ? 'folder' : 'music_note'}</span>
             </div>
-            <div className="flex flex-col flex-1 min-w-0" onClick={() => item.type === 'folder' ? setCurrentPath(item.fullPath) : onSelectTrack(item.data)}>
+            <div className="flex flex-col flex-1 min-w-0" onClick={() => handleNavigate(item)}>
                 <p className="text-sm font-bold text-gray-800 dark:text-gray-200 truncate">{item.type === 'track' ? item.data.metadata.title : item.name}</p>
                 <p className="text-[10px] text-gray-400 truncate">{item.type === 'track' ? item.data.metadata.performer : (item.type === 'folder' ? 'Directorio' : '')}</p>
             </div>
