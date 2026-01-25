@@ -302,16 +302,16 @@ const TrackList: React.FC<TrackListProps> = ({
             </div>
         )}
 
-        {/* DATABASE CONTROLS (Updated for size and visibility) */}
+        {/* DATABASE CONTROLS (Updated for dynamic balance) */}
         {!isSelectionView && (
-            <div className="flex gap-2 p-3 bg-gray-50 border-b border-gray-100 justify-center flex-wrap">
+            <div className="flex items-center justify-center flex-wrap gap-2 p-2 bg-gray-50 border-b border-gray-100">
                 {/* Visible for EVERYONE */}
                 <button 
                     onClick={() => onSyncRoot(activeRoot)} 
-                    className="flex items-center gap-2 bg-white border border-gray-200 px-5 py-2.5 rounded-lg shadow-sm text-sm font-bold text-gray-700 hover:bg-gray-100 transition-all active:scale-95"
+                    className="flex-1 md:flex-none flex items-center justify-center gap-1.5 bg-white border border-gray-200 px-2 py-2 md:px-5 md:py-2.5 rounded-lg shadow-sm text-[10px] md:text-sm font-bold text-gray-700 hover:bg-gray-100 transition-all active:scale-95 whitespace-nowrap min-w-[80px]"
                     title="Cargar base de datos desde la nube"
                 >
-                    <span className="material-symbols-outlined text-lg text-green-600">cloud_download</span> 
+                    <span className="material-symbols-outlined text-base md:text-lg text-green-600">cloud_download</span> 
                     Actualizar
                 </button>
                 
@@ -320,26 +320,26 @@ const TrackList: React.FC<TrackListProps> = ({
                     <>
                         <button 
                             onClick={() => onExportRoot(activeRoot)} 
-                            className="flex items-center gap-2 bg-white border border-gray-200 px-5 py-2.5 rounded-lg shadow-sm text-sm font-bold text-gray-700 hover:bg-gray-100 transition-all active:scale-95"
+                            className="flex-1 md:flex-none flex items-center justify-center gap-1.5 bg-white border border-gray-200 px-2 py-2 md:px-5 md:py-2.5 rounded-lg shadow-sm text-[10px] md:text-sm font-bold text-gray-700 hover:bg-gray-100 transition-all active:scale-95 whitespace-nowrap min-w-[80px]"
                             title="Descargar base de datos local"
                         >
-                            <span className="material-symbols-outlined text-lg text-blue-600">save</span> 
+                            <span className="material-symbols-outlined text-base md:text-lg text-blue-600">save</span> 
                             Guardar
                         </button>
                         <button 
                             onClick={() => onClearRoot(activeRoot)} 
-                            className="flex items-center gap-2 bg-white border border-gray-200 px-5 py-2.5 rounded-lg shadow-sm text-sm font-bold text-gray-700 hover:bg-red-50 hover:text-red-600 transition-all active:scale-95"
+                            className="flex-1 md:flex-none flex items-center justify-center gap-1.5 bg-white border border-gray-200 px-2 py-2 md:px-5 md:py-2.5 rounded-lg shadow-sm text-[10px] md:text-sm font-bold text-gray-700 hover:bg-red-50 hover:text-red-600 transition-all active:scale-95 whitespace-nowrap min-w-[80px]"
                             title="Eliminar todos los datos de esta carpeta"
                         >
-                            <span className="material-symbols-outlined text-lg text-red-500">delete</span> 
+                            <span className="material-symbols-outlined text-base md:text-lg text-red-500">delete</span> 
                             Limpiar
                         </button>
                         {customRoots.includes(activeRoot) && (
                             <button 
                                 onClick={() => { setRenameInput(activeRoot); setShowRenameModal(true); }}
-                                className="flex items-center gap-2 bg-white border border-gray-200 px-5 py-2.5 rounded-lg shadow-sm text-sm font-bold text-gray-700 hover:bg-gray-100 transition-all active:scale-95"
+                                className="flex-none flex items-center justify-center bg-white border border-gray-200 px-3 py-2 md:px-4 md:py-2.5 rounded-lg shadow-sm text-gray-700 hover:bg-gray-100 transition-all active:scale-95"
                             >
-                                <span className="material-symbols-outlined text-lg text-gray-500">edit</span>
+                                <span className="material-symbols-outlined text-base md:text-lg text-gray-500">edit</span>
                             </button>
                         )}
                     </>
