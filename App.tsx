@@ -84,7 +84,16 @@ const App: React.FC = () => {
         
         const localUsers = localStorage.getItem(USERS_KEY);
         let currentUsersList = [DEFAULT_ADMIN];
-        if (localUsers) { try { const parsed = JSON.parse(localUsers); if (Array.isArray(parsed) && parsed.length > 0) currentUsersList = parsed; } catch { } }
+        if (localUsers) { 
+            try { 
+                const parsed = JSON.parse(localUsers); 
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    // FORCE DEFAULT ADMIN: Remove any 'admin' user from storage and use the code constant
+                    const nonAdminUsers = parsed.filter((u: User) => u.username !== 'admin');
+                    currentUsersList = [DEFAULT_ADMIN, ...nonAdminUsers];
+                }
+            } catch { } 
+        }
         setUsers(currentUsersList);
 
         const savedRoots = localStorage.getItem(CUSTOM_ROOTS_KEY);
@@ -156,17 +165,19 @@ const App: React.FC = () => {
           let fetchedRoots: string[] = [];
 
           if (Array.isArray(data)) {
-              // Legacy format: just users array
               fetchedUsers = data;
           } else if (data.users || data.customRoots) {
-              // New format: object with users and roots
               fetchedUsers = data.users || [];
               fetchedRoots = data.customRoots || [];
           }
 
           if (fetchedUsers.length > 0) {
-              setUsers(fetchedUsers);
-              localStorage.setItem(USERS_KEY, JSON.stringify(fetchedUsers));
+              // FORCE DEFAULT ADMIN on sync as well
+              const nonAdminUsers = fetchedUsers.filter(u => u.username !== 'admin');
+              const finalUsers = [DEFAULT_ADMIN, ...nonAdminUsers];
+
+              setUsers(finalUsers);
+              localStorage.setItem(USERS_KEY, JSON.stringify(finalUsers));
           }
           
           if (fetchedRoots.length > 0) {
@@ -174,7 +185,7 @@ const App: React.FC = () => {
               localStorage.setItem(CUSTOM_ROOTS_KEY, JSON.stringify(fetchedRoots));
           }
 
-          alert("Sincronización de usuarios y carpetas completada.");
+          alert("Sincronización de usuarios y carpetas completada. Admin restaurado.");
           window.location.reload(); 
       } catch(e) {
           alert("Error al sincronizar usuarios.");
