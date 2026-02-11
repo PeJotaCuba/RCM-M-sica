@@ -409,7 +409,7 @@ const App: React.FC = () => {
             <button className="flex items-center gap-3" onClick={() => navigateTo(ViewState.LIST)}>
                 <div className="size-10 flex items-center justify-center bg-white/10 rounded-full border-2 border-white/20 overflow-hidden p-1">
                      <img 
-                        src="icons/logo.png" 
+                        src="/icons/logo.png" 
                         alt="Logo" 
                         className="w-full h-full object-contain"
                      />
