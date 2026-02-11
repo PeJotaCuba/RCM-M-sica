@@ -51,7 +51,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, users, onUpda
              <div className="flex flex-col items-center mb-2">
                 <div className="size-32 mb-4 relative hover:scale-105 transition-transform duration-500">
                     <img 
-                        src="icons/Logo Cmnl Musica.png" 
+                        src="icons/logo.png" 
                         alt="CMNL Música Logo" 
                         className="w-full h-full object-contain drop-shadow-xl"
                     />
