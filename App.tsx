@@ -19,6 +19,7 @@ const USERS_KEY = 'rcm_users_db';
 const SELECTION_KEY = 'rcm_current_selection';
 const SAVED_SELECTIONS_KEY = 'rcm_saved_selections';
 const CUSTOM_ROOTS_KEY = 'rcm_custom_roots';
+const PORTAL_VERIFIED_KEY = 'rcm_portal_verified';
 
 // Configuration for Database URLs and Filenames
 const USERS_DB_URL = 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/musuarios.json';
@@ -43,7 +44,9 @@ const DEFAULT_ADMIN: User = {
 };
 
 const App: React.FC = () => {
+  const [isCheckingSecurity, setIsCheckingSecurity] = useState(true);
   const [accessDenied, setAccessDenied] = useState(false);
+  
   const [tracks, setTracks] = useState<Track[]>([]);
   const [view, setView] = useState<ViewState>(ViewState.LOGIN);
   const [authMode, setAuthMode] = useState<AuthMode>(null);
@@ -68,17 +71,37 @@ const App: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
-    // SECURITY CHECK: Referrer Validation
-    const referrer = document.referrer;
-    // Check if referrer exists and includes the allowed domain (handling potential trailing slashes or subpaths)
-    if (!referrer || !referrer.includes('cmnl-app.vercel.app')) {
-        // En desarrollo local a veces document.referrer está vacío, 
-        // pero para producción cumplimos estrictamente lo pedido.
-        // Si quieres probar en local, comenta la siguiente línea:
-        setAccessDenied(true);
-        return; 
-    }
+    // SECURITY LOGIC
+    const checkAccess = () => {
+        const referrer = document.referrer;
+        const isFromPortal = referrer && referrer.includes('cmnl-app.vercel.app');
+        const hasVerifiedBefore = localStorage.getItem(PORTAL_VERIFIED_KEY) === 'true';
+        
+        // Check if running in PWA mode (standalone)
+        const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone;
 
+        // ALLOW IF:
+        // 1. Coming directly from the portal (Referrer check)
+        // 2. OR: Is installed as PWA AND has verified before (User already authenticated via portal once)
+        
+        if (isFromPortal) {
+            localStorage.setItem(PORTAL_VERIFIED_KEY, 'true');
+            setAccessDenied(false);
+        } else if (isStandalone && hasVerifiedBefore) {
+            setAccessDenied(false);
+        } else {
+            // Otherwise, DENY.
+            // Comment out 'setAccessDenied(true)' if developing locally without referrer
+            setAccessDenied(true); 
+            // In local dev, you might want to uncomment below:
+            // setAccessDenied(false);
+        }
+        setIsCheckingSecurity(false);
+    };
+
+    checkAccess();
+    
+    // Only proceed to init app if access is likely granted (or we let initApp run anyway, UI blocks it)
     const initApp = async () => {
         try { const dbTracks = await loadTracksFromDB(); if (dbTracks.length > 0) setTracks(dbTracks); } catch (e) { console.error(e); }
         
@@ -88,7 +111,6 @@ const App: React.FC = () => {
             try { 
                 const parsed = JSON.parse(localUsers); 
                 if (Array.isArray(parsed) && parsed.length > 0) {
-                    // FORCE DEFAULT ADMIN: Remove any 'admin' user from storage and use the code constant
                     const nonAdminUsers = parsed.filter((u: User) => u.username !== 'admin');
                     currentUsersList = [DEFAULT_ADMIN, ...nonAdminUsers];
                 }
@@ -118,6 +140,7 @@ const App: React.FC = () => {
             } catch { localStorage.removeItem(AUTH_KEY); }
         }
     };
+    
     initApp();
   }, []);
 
@@ -153,14 +176,11 @@ const App: React.FC = () => {
   };
 
   // --- SYNC & EXPORT HANDLERS ---
-
-  // 1. Sync Users & Custom Roots (musuarios.json)
   const handleSyncData = async () => {
       setIsUpdating(true);
       try {
           const r = await fetch(USERS_DB_URL);
           const data = await r.json();
-          
           let fetchedUsers: User[] = [];
           let fetchedRoots: string[] = [];
 
@@ -172,112 +192,73 @@ const App: React.FC = () => {
           }
 
           if (fetchedUsers.length > 0) {
-              // FORCE DEFAULT ADMIN on sync as well
               const nonAdminUsers = fetchedUsers.filter(u => u.username !== 'admin');
               const finalUsers = [DEFAULT_ADMIN, ...nonAdminUsers];
-
               setUsers(finalUsers);
               localStorage.setItem(USERS_KEY, JSON.stringify(finalUsers));
           }
-          
           if (fetchedRoots.length > 0) {
               setCustomRoots(fetchedRoots);
               localStorage.setItem(CUSTOM_ROOTS_KEY, JSON.stringify(fetchedRoots));
           }
-
-          alert("Sincronización de usuarios y carpetas completada. Admin restaurado.");
+          alert("Sincronización completada.");
           window.location.reload(); 
       } catch(e) {
-          alert("Error al sincronizar usuarios.");
+          alert("Error al sincronizar.");
       } finally {
           setIsUpdating(false);
       }
   };
 
-  // 2. Export Users & Custom Roots (musuarios.json)
   const handleExportUsersDB = () => {
-      const exportData = {
-          users: users,
-          customRoots: customRoots
-      };
+      const exportData = { users: users, customRoots: customRoots };
       const dataStr = JSON.stringify(exportData, null, 2);
       const blob = new Blob([dataStr], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href = url;
-      link.download = "musuarios.json";
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      link.href = url; link.download = "musuarios.json";
+      document.body.appendChild(link); link.click(); document.body.removeChild(link); URL.revokeObjectURL(url);
   };
 
-  // 3. Folder Specific Handlers
   const handleSyncRoot = async (rootName: string) => {
       const config = ROOT_DB_CONFIG[rootName];
       if (!config) return alert(`No hay configuración remota para ${rootName}`);
-      
       setIsUpdating(true);
       try {
           const r = await fetch(config.url);
-          if (!r.ok) throw new Error("No se pudo descargar la base de datos.");
+          if (!r.ok) throw new Error("Error DB");
           const newTracks: Track[] = await r.json();
-
-          // Merge Logic: Remove old tracks from this root, add new ones
           const otherTracks = tracks.filter(t => !t.path.startsWith(rootName));
-          // Ensure new tracks have the correct path prefix just in case, or trust the JSON
-          const finalNewTracks = newTracks.map(t => ({...t, path: t.path.startsWith(rootName) ? t.path : `${rootName}/${t.path}`})); // Basic safety
-
-          await updateTracks([...otherTracks, ...newTracks]); // Assuming JSON has correct paths
-          alert(`Base de datos de ${rootName} actualizada (${newTracks.length} pistas).`);
-      } catch (e) {
-          alert(`Error al actualizar ${rootName}. Verifique la conexión.`);
-          console.error(e);
-      } finally {
-          setIsUpdating(false);
-      }
+          await updateTracks([...otherTracks, ...newTracks]);
+          alert(`Base de datos de ${rootName} actualizada.`);
+      } catch (e) { alert(`Error al actualizar ${rootName}.`); } finally { setIsUpdating(false); }
   };
 
   const handleExportRoot = (rootName: string) => {
-      const config = ROOT_DB_CONFIG[rootName];
-      // Filter tracks belonging to this root
       const rootTracks = tracks.filter(t => t.path.startsWith(rootName));
-      if (rootTracks.length === 0) return alert(`No hay datos en ${rootName} para guardar.`);
-
+      if (rootTracks.length === 0) return alert(`No hay datos en ${rootName}.`);
+      const config = ROOT_DB_CONFIG[rootName];
       const dataStr = JSON.stringify(rootTracks, null, 2);
       const blob = new Blob([dataStr], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href = url;
-      link.download = config ? config.filename : `${rootName.replace(/\s+/g, '').toLowerCase()}.json`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      link.href = url; link.download = config ? config.filename : `${rootName.replace(/\s+/g, '').toLowerCase()}.json`;
+      document.body.appendChild(link); link.click(); document.body.removeChild(link); URL.revokeObjectURL(url);
   };
 
   const handleClearRoot = async (rootName: string) => {
-      if (!window.confirm(`¿Está seguro de BORRAR todos los datos de ${rootName}?`)) return;
+      if (!window.confirm(`¿Borrar ${rootName}?`)) return;
       const remainingTracks = tracks.filter(t => !t.path.startsWith(rootName));
       await updateTracks(remainingTracks);
-      alert(`Datos de ${rootName} eliminados.`);
   };
 
-  // --- END HANDLERS ---
-
-  const handleAddCustomRoot = (name: string) => {
-      const newRoots = [...customRoots, name];
-      setCustomRoots(newRoots);
-      localStorage.setItem(CUSTOM_ROOTS_KEY, JSON.stringify(newRoots));
-  };
-
+  const handleAddCustomRoot = (name: string) => { const newRoots = [...customRoots, name]; setCustomRoots(newRoots); localStorage.setItem(CUSTOM_ROOTS_KEY, JSON.stringify(newRoots)); };
   const handleRenameRoot = async (oldName: string, newName: string) => {
       const newRoots = customRoots.map(r => r === oldName ? newName : r);
-      setCustomRoots(newRoots);
-      localStorage.setItem(CUSTOM_ROOTS_KEY, JSON.stringify(newRoots));
+      setCustomRoots(newRoots); localStorage.setItem(CUSTOM_ROOTS_KEY, JSON.stringify(newRoots));
       const updatedTracks = tracks.map(t => t.path.startsWith(oldName) ? { ...t, path: t.path.replace(oldName, newName) } : t);
       await updateTracks(updatedTracks);
-      alert(`Carpeta "${oldName}" ahora es "${newName}".`);
+      alert(`Carpeta renombrada.`);
   };
 
   const handleUploadMultipleTxt = async (files: FileList, targetRoot: string) => {
@@ -287,8 +268,7 @@ const App: React.FC = () => {
       try {
           for (let i = 0; i < files.length; i++) {
               const text = await files[i].text();
-              const t = parseTxtDatabase(text, targetRoot);
-              parsedTracks = [...parsedTracks, ...t];
+              parsedTracks = [...parsedTracks, ...parseTxtDatabase(text, targetRoot)];
           }
           await updateTracks(prev => [...prev, ...parsedTracks]);
           alert(`${parsedTracks.length} pistas añadidas.`);
@@ -296,51 +276,27 @@ const App: React.FC = () => {
   };
 
   const handleSelectTrack = (track: Track) => { setSelectedTrack(track); };
-  
-  const handleToggleSelection = (track: Track) => { 
-      setSelectedTracksList(prev => prev.find(t => t.id === track.id) ? prev.filter(t => t.id !== track.id) : [...prev, track]); 
-  };
-
-  const handleClearSelection = () => { 
-      if (window.confirm('¿Eliminar la selección actual? El proceso no se puede deshacer.')) { 
-          setSelectedTracksList([]); localStorage.removeItem(SELECTION_KEY);
-      } 
-  };
+  const handleToggleSelection = (track: Track) => { setSelectedTracksList(prev => prev.find(t => t.id === track.id) ? prev.filter(t => t.id !== track.id) : [...prev, track]); };
+  const handleClearSelection = () => { if (window.confirm('¿Limpiar selección?')) { setSelectedTracksList([]); localStorage.removeItem(SELECTION_KEY); } };
 
   const handleSaveSelectionPersist = () => {
-    if (selectedTracksList.length === 0) return alert("No hay temas seleccionados para guardar.");
-    if (savedSelections.length >= 5) {
-        return alert("Has alcanzado el límite de 5 selecciones guardadas. Por favor, elimina alguna antes de guardar una nueva.");
-    }
-    const name = window.prompt("Nombre para esta selección:");
+    if (selectedTracksList.length === 0) return alert("Selección vacía.");
+    if (savedSelections.length >= 5) return alert("Límite de 5 selecciones.");
+    const name = window.prompt("Nombre:");
     if (!name) return;
-    const newSelection: SavedSelection = {
-        id: `sel-${Date.now()}`,
-        name: name.trim(),
-        date: new Date().toISOString(),
-        tracks: [...selectedTracksList]
-    };
+    const newSelection: SavedSelection = { id: `sel-${Date.now()}`, name: name.trim(), date: new Date().toISOString(), tracks: [...selectedTracksList] };
     setSavedSelections(prev => [newSelection, ...prev]);
-    setSelectedTracksList([]); 
-    localStorage.removeItem(SELECTION_KEY);
-    alert("Selección guardada y panel limpiado.");
+    setSelectedTracksList([]); localStorage.removeItem(SELECTION_KEY);
   };
 
   const handleLoadSavedSelection = (sel: SavedSelection) => {
-      if (selectedTracksList.length > 0) {
-          if (!window.confirm("Tienes temas seleccionados actualmente. ¿Deseas agregar la selección guardada a los actuales?")) return;
-      }
+      if (selectedTracksList.length > 0 && !window.confirm("¿Fusionar con selección actual?")) return;
       const currentIds = new Set(selectedTracksList.map(t => t.id));
       const toAdd = sel.tracks.filter(t => !currentIds.has(t.id));
       setSelectedTracksList(prev => [...prev, ...toAdd]);
-      alert(`${toAdd.length} temas cargados de "${sel.name}".`);
   };
 
-  const handleDeleteSavedSelection = (id: string) => {
-      if (window.confirm("¿Eliminar esta selección guardada?")) {
-          setSavedSelections(prev => prev.filter(s => s.id !== id));
-      }
-  };
+  const handleDeleteSavedSelection = (id: string) => { if (window.confirm("¿Eliminar?")) setSavedSelections(prev => prev.filter(s => s.id !== id)); };
 
   const handleProcessWishlist = () => {
       if (!wishlistText.trim()) return;
@@ -350,41 +306,23 @@ const App: React.FC = () => {
           const match = tracks.find(t => t.metadata.title.toLowerCase().includes(q.toLowerCase()) || t.filename.toLowerCase().includes(q.toLowerCase()));
           if (match && !selectedTracksList.find(s => s.id === match.id)) found.push(match);
       });
-      if (found.length > 0) {
-          setSelectedTracksList(prev => [...prev, ...found]);
-          alert(`${found.length} temas añadidos.`);
-      } else { alert("No se encontraron temas."); }
+      if (found.length > 0) { setSelectedTracksList(prev => [...prev, ...found]); alert(`${found.length} añadidos.`); } else { alert("Sin coincidencias."); }
       setShowWishlist(false); setWishlistText('');
   };
 
   const handleOpenExportModal = () => {
       setEditingReportId(null);
-      const items: ExportItem[] = selectedTracksList.map(t => ({ 
-          id: t.id, 
-          title: t.metadata.title, 
-          author: t.metadata.author, 
-          authorCountry: t.metadata.authorCountry || '', 
-          performer: t.metadata.performer, 
-          performerCountry: t.metadata.performerCountry || '', 
-          genre: t.metadata.genre || '', 
-          source: 'db', 
-          path: t.path 
-      }));
-      setExportItems(items); 
-      setShowExportModal(true);
+      const items: ExportItem[] = selectedTracksList.map(t => ({ id: t.id, title: t.metadata.title, author: t.metadata.author, authorCountry: t.metadata.authorCountry || '', performer: t.metadata.performer, performerCountry: t.metadata.performerCountry || '', genre: t.metadata.genre || '', source: 'db', path: t.path }));
+      setExportItems(items); setShowExportModal(true);
   };
 
   const handleUpdateExportItem = (index: number, field: keyof ExportItem, value: string) => {
-      const newItems = [...exportItems];
-      newItems[index] = { ...newItems[index], [field]: value };
-      setExportItems(newItems);
+      const newItems = [...exportItems]; newItems[index] = { ...newItems[index], [field]: value }; setExportItems(newItems);
   };
 
   const handleShareWhatsApp = () => {
       let message = `*CRÉDITOS RCM*\n*Programa:* ${programName}\n\n`;
-      exportItems.forEach(item => { 
-          message += `🎵 *${item.title}* - ${item.performer}\n📂 _${item.path || 'Manual'}_\n\n`; 
-      });
+      exportItems.forEach(item => { message += `🎵 *${item.title}* - ${item.performer}\n📂 _${item.path || 'Manual'}_\n\n`; });
       window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, '_blank');
   };
 
@@ -394,33 +332,32 @@ const App: React.FC = () => {
       const dateStr = new Date().toISOString().split('T')[0];
       const fileName = `PM-${programName}-${dateStr}.pdf`;
       await saveReportToDB({ id: editingReportId || `rep-${Date.now()}`, date: new Date().toISOString(), program: programName, generatedBy: currentUser.username, fileName, pdfBlob, items: exportItems, status: { downloaded: false, sent: false } });
-      alert("Reporte PDF generado y guardado en Reportes.");
-      setShowExportModal(false);
+      alert("Reporte guardado."); setShowExportModal(false);
   };
 
   const handleSaveEdit = (updatedTrack: Track) => {
       updateTracks(prev => prev.map(t => t.id === updatedTrack.id ? updatedTrack : t));
-      if (view === ViewState.SELECTION) {
-           setSelectedTracksList(prev => prev.map(t => t.id === updatedTrack.id ? updatedTrack : t));
-      }
+      if (view === ViewState.SELECTION) setSelectedTracksList(prev => prev.map(t => t.id === updatedTrack.id ? updatedTrack : t));
       setSelectedTrack(null);
   };
 
-  const handleEditReport = (report: Report) => {
-      if (report.items) {
-          setExportItems(report.items);
-          setProgramName(report.program);
-          setEditingReportId(report.id);
-          setShowExportModal(true);
-      }
-  };
-
+  const handleEditReport = (report: Report) => { if (report.items) { setExportItems(report.items); setProgramName(report.program); setEditingReportId(report.id); setShowExportModal(true); } };
   const navigateTo = (v: ViewState) => { setView(v); window.history.pushState({ view: v }, ''); };
 
-  // --- ACCESS DENIED RENDER ---
+  // --- RENDERING ---
+
+  if (isCheckingSecurity) {
+      return (
+          <div className="flex flex-col items-center justify-center h-screen bg-gray-100 dark:bg-zinc-900">
+               <div className="w-12 h-12 border-4 border-azul-header border-t-transparent rounded-full animate-spin"></div>
+               <p className="mt-4 text-xs font-bold text-gray-500 uppercase tracking-widest">Verificando Credenciales...</p>
+          </div>
+      );
+  }
+
   if (accessDenied) {
       return (
-          <div className="flex flex-col items-center justify-center h-screen bg-gray-100 dark:bg-zinc-900 p-6 text-center">
+          <div className="flex flex-col items-center justify-center h-screen bg-gray-100 dark:bg-zinc-900 p-6 text-center animate-fade-in">
               <span className="material-symbols-outlined text-6xl text-red-500 mb-4">gpp_bad</span>
               <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Acceso Denegado</h1>
               <p className="text-gray-600 dark:text-gray-400 mb-6">Esta aplicación solo puede ejecutarse desde el portal oficial.</p>
