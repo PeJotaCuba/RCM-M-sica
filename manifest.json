@@ -1,0 +1,21 @@
+
+{
+  "name": "CMNL Música",
+  "short_name": "CMNL Música",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#1a3a5f",
+  "icons": [
+    {
+      "src": "icons/Logo Cmnl Musica.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/Logo Cmnl Musica.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

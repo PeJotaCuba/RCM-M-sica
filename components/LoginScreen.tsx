@@ -46,16 +46,18 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, users, onUpda
        
        <div className="flex-1 flex flex-col items-center justify-center p-6 z-10 w-full overflow-y-auto">
           <div className="w-full max-w-sm flex flex-col items-center space-y-6 my-auto bg-white dark:bg-zinc-900 p-8 rounded-2xl shadow-xl border border-gray-100 dark:border-white/5">
-             <div className="text-center mb-4">
-                <div className="w-24 h-24 mx-auto mb-4 relative flex items-center justify-center">
-                   <div className="w-full h-full flex flex-col items-center justify-center bg-white/10 rounded-full border-4 border-miel/30 shadow-lg animate-fade-in">
-                       <span className="material-symbols-outlined text-5xl text-primary drop-shadow-md">
-                           radio
-                       </span>
-                   </div>
+             
+             {/* Logo / Icon Header */}
+             <div className="flex flex-col items-center mb-2">
+                <div className="size-32 mb-4 relative hover:scale-105 transition-transform duration-500">
+                    <img 
+                        src="icons/Logo Cmnl Musica.png" 
+                        alt="CMNL Música Logo" 
+                        className="w-full h-full object-contain drop-shadow-xl"
+                    />
                 </div>
-                <h1 className="text-2xl font-bold text-gray-900 dark:text-white tracking-tight">RCM Música</h1>
-                <p className="text-xs text-gray-400 mt-1 font-medium uppercase tracking-widest">Acceso Restringido</p>
+                <h1 className="text-xl font-bold text-gray-900 dark:text-white tracking-tight">CMNL MÚSICA</h1>
+                <p className="text-xs text-gray-400 font-bold uppercase tracking-widest mt-1">Acceso Restringido</p>
              </div>
 
              {/* FORMULARIO DE ACCESO */}

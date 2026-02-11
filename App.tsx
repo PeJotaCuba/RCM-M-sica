@@ -407,11 +407,15 @@ const App: React.FC = () => {
 
         <header className="bg-azul-header text-white px-4 py-3 flex items-center justify-between shadow-md relative z-20 shrink-0">
             <button className="flex items-center gap-3" onClick={() => navigateTo(ViewState.LIST)}>
-                <div className="size-10 flex items-center justify-center bg-white/10 rounded-full border-2 border-white/20">
-                    <span className="material-symbols-outlined text-2xl text-miel">radio</span>
+                <div className="size-10 flex items-center justify-center bg-white/10 rounded-full border-2 border-white/20 overflow-hidden p-1">
+                     <img 
+                        src="icons/Logo Cmnl Musica.png" 
+                        alt="Logo" 
+                        className="w-full h-full object-contain"
+                     />
                 </div>
                 <div className="text-left">
-                    <h1 className="text-sm font-bold tracking-tight">RCM MÚSICA</h1>
+                    <h1 className="text-sm font-bold tracking-tight">CMNL MÚSICA</h1>
                     <span className="text-[8px] opacity-60 font-bold uppercase">Gestión Musical</span>
                 </div>
             </button>
