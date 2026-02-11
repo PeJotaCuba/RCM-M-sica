@@ -407,12 +407,16 @@ const App: React.FC = () => {
 
         <header className="bg-azul-header text-white px-4 py-3 flex items-center justify-between shadow-md relative z-20 shrink-0">
             <button className="flex items-center gap-3" onClick={() => navigateTo(ViewState.LIST)}>
-                <div className="size-10 flex items-center justify-center bg-white/10 rounded-full border-2 border-white/20 overflow-hidden p-1">
-                     <img 
-                        src="/icons/logo.png" 
-                        alt="Logo" 
-                        className="w-full h-full object-contain"
-                     />
+                <div className="size-10 flex items-center justify-center bg-white/10 rounded-full border-2 border-white/20 overflow-hidden p-1.5 hover:bg-white/20 transition-colors">
+                     <svg viewBox="0 0 100 100" className="w-full h-full drop-shadow-sm">
+                        <rect width="100" height="100" rx="20" fill="#1a3a5f" />
+                        <path d="M20 75V45a5 5 0 0 1 10 0v30a5 5 0 0 1-10 0z" fill="#d4a017" />
+                        <path d="M35 75V25a5 5 0 0 1 10 0v50a5 5 0 0 1-10 0z" fill="#d4a017" />
+                        <path d="M50 75V45a5 5 0 0 1 10 0v30a5 5 0 0 1-10 0z" fill="#d4a017" />
+                        <path d="M65 75V25a5 5 0 0 1 10 0v50a5 5 0 0 1-10 0z" fill="#d4a017" />
+                        <path d="M80 75V45a5 5 0 0 1 10 0v30a5 5 0 0 1-10 0z" fill="#d4a017" />
+                        <circle cx="85" cy="15" r="8" fill="#df4534" stroke="#ffffff" strokeWidth="2" />
+                     </svg>
                 </div>
                 <div className="text-left">
                     <h1 className="text-sm font-bold tracking-tight">CMNL MÚSICA</h1>

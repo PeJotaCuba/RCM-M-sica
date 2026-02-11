@@ -50,11 +50,15 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, users, onUpda
              {/* Logo / Icon Header */}
              <div className="flex flex-col items-center mb-2">
                 <div className="size-32 mb-4 relative hover:scale-105 transition-transform duration-500">
-                    <img 
-                        src="/icons/logo.png" 
-                        alt="CMNL Música Logo" 
-                        className="w-full h-full object-contain drop-shadow-xl"
-                    />
+                    <svg viewBox="0 0 100 100" className="w-full h-full drop-shadow-xl">
+                        <rect width="100" height="100" rx="20" fill="#1a3a5f" />
+                        <path d="M20 75V45a5 5 0 0 1 10 0v30a5 5 0 0 1-10 0z" fill="#d4a017" />
+                        <path d="M35 75V25a5 5 0 0 1 10 0v50a5 5 0 0 1-10 0z" fill="#d4a017" />
+                        <path d="M50 75V45a5 5 0 0 1 10 0v30a5 5 0 0 1-10 0z" fill="#d4a017" />
+                        <path d="M65 75V25a5 5 0 0 1 10 0v50a5 5 0 0 1-10 0z" fill="#d4a017" />
+                        <path d="M80 75V45a5 5 0 0 1 10 0v30a5 5 0 0 1-10 0z" fill="#d4a017" />
+                        <circle cx="85" cy="15" r="8" fill="#df4534" stroke="#ffffff" strokeWidth="2" />
+                    </svg>
                 </div>
                 <h1 className="text-xl font-bold text-gray-900 dark:text-white tracking-tight">CMNL MÚSICA</h1>
                 <p className="text-xs text-gray-400 font-bold uppercase tracking-widest mt-1">Acceso Restringido</p>
