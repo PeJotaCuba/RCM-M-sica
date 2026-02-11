@@ -22,6 +22,7 @@ const CUSTOM_ROOTS_KEY = 'rcm_custom_roots';
 
 // Configuration for Database URLs and Filenames
 const USERS_DB_URL = 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/musuarios.json';
+const ALLOWED_REFERRER = 'https://cmnl-app.vercel.app/';
 
 const ROOT_DB_CONFIG: Record<string, { url: string, filename: string }> = {
     'Música 1': { url: 'https://raw.githubusercontent.com/PeJotaCuba/RCM-M-sica/refs/heads/main/mdatos1.json', filename: 'mdatos1.json' },
@@ -34,7 +35,7 @@ const ROOT_DB_CONFIG: Record<string, { url: string, filename: string }> = {
 
 const DEFAULT_ADMIN: User = { 
     username: 'admin', 
-    password: 'RCMM26', 
+    password: 'RC0026', 
     role: 'admin',
     fullName: 'Administrador Principal',
     phone: '55555555',
@@ -42,6 +43,7 @@ const DEFAULT_ADMIN: User = {
 };
 
 const App: React.FC = () => {
+  const [accessDenied, setAccessDenied] = useState(false);
   const [tracks, setTracks] = useState<Track[]>([]);
   const [view, setView] = useState<ViewState>(ViewState.LOGIN);
   const [authMode, setAuthMode] = useState<AuthMode>(null);
@@ -66,6 +68,17 @@ const App: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
+    // SECURITY CHECK: Referrer Validation
+    const referrer = document.referrer;
+    // Check if referrer exists and includes the allowed domain (handling potential trailing slashes or subpaths)
+    if (!referrer || !referrer.includes('cmnl-app.vercel.app')) {
+        // En desarrollo local a veces document.referrer está vacío, 
+        // pero para producción cumplimos estrictamente lo pedido.
+        // Si quieres probar en local, comenta la siguiente línea:
+        setAccessDenied(true);
+        return; 
+    }
+
     const initApp = async () => {
         try { const dbTracks = await loadTracksFromDB(); if (dbTracks.length > 0) setTracks(dbTracks); } catch (e) { console.error(e); }
         
@@ -392,6 +405,24 @@ const App: React.FC = () => {
   };
 
   const navigateTo = (v: ViewState) => { setView(v); window.history.pushState({ view: v }, ''); };
+
+  // --- ACCESS DENIED RENDER ---
+  if (accessDenied) {
+      return (
+          <div className="flex flex-col items-center justify-center h-screen bg-gray-100 dark:bg-zinc-900 p-6 text-center">
+              <span className="material-symbols-outlined text-6xl text-red-500 mb-4">gpp_bad</span>
+              <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Acceso Denegado</h1>
+              <p className="text-gray-600 dark:text-gray-400 mb-6">Esta aplicación solo puede ejecutarse desde el portal oficial.</p>
+              <a 
+                href={ALLOWED_REFERRER}
+                className="bg-azul-header text-white font-bold py-3 px-6 rounded-xl shadow-lg hover:bg-opacity-90 transition-all flex items-center gap-2"
+              >
+                  <span className="material-symbols-outlined">captive_portal</span>
+                  Ir al Portal
+              </a>
+          </div>
+      );
+  }
 
   if (view === ViewState.LOGIN) return <LoginScreen onLoginSuccess={handleLoginSuccess} users={users} onUpdateUsers={handleSyncData} isUpdating={isUpdating} />;
 

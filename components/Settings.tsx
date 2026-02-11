@@ -107,7 +107,10 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
 
   const handleSubmitUser = () => {
       if (!formData.username || !formData.password || !formData.fullName) { return alert("Todos los campos marcados son obligatorios."); }
-      if (formData.password !== formData.confirmPassword) { return alert("Las contraseñas no coinciden."); }
+      if (formData.password !== formData.confirmPassword) { return alert("Los PINs no coinciden."); }
+      // Validate PIN format (4 digits)
+      if (!/^\d{4}$/.test(formData.password)) { return alert("El PIN debe ser exactamente de 4 dígitos numéricos."); }
+      
       if ((!isEditing || formData.username !== originalUsername) && users.some(u => u.username === formData.username)) { return alert("El nombre de usuario ya existe."); }
       const finalUniqueId = formData.uniqueId.trim() || generateUniqueId(formData.fullName);
       const userObj: User = { username: formData.username, password: formData.password, role: formData.role, fullName: formData.fullName, phone: formData.phone, uniqueId: finalUniqueId };
@@ -141,7 +144,7 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
 
   const handleShareWhatsApp = (u: User) => {
       if (!u.phone) { return alert("Este usuario no tiene número de móvil registrado."); }
-      const message = `Saludos. Tus credenciales APP-RCM son\nUsuario: ${u.username}\nContraseña: ${u.password}\n\nDisfruta de nuestras apps en los siguientes enlaces:\nAgenda https://rcmagenda.vercel.app/#/home\nMúsica https://rcm-musica.vercel.app/`;
+      const message = `Saludos. Tus credenciales APP-RCM son\nUsuario: ${u.username}\nPIN: ${u.password}\n\nDisfruta de nuestras apps en los siguientes enlaces:\nAgenda https://rcmagenda.vercel.app/#/home\nMúsica https://rcm-musica.vercel.app/`;
       const url = `https://wa.me/${u.phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(message)}`;
       window.open(url, '_blank');
   };
@@ -156,6 +159,13 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
       if (u.username === 'admin') return false;
       if (currentUser && u.username === currentUser.username) return false;
       return true;
+  };
+
+  const handlePinInput = (e: React.ChangeEvent<HTMLInputElement>, field: 'password' | 'confirmPassword') => {
+      const val = e.target.value;
+      if (/^\d{0,4}$/.test(val)) {
+          setFormData({...formData, [field]: val});
+      }
   };
 
   return (
@@ -251,13 +261,28 @@ const Settings: React.FC<SettingsProps> = ({ tracks, users, onAddUser, onEditUse
                         <div><label className="text-xs font-bold text-gray-500 block mb-1">Rol</label><div className="flex gap-2">{['user', 'director', 'admin'].map(r => (<button key={r} type="button" onClick={() => setFormData({...formData, role: r as any})} className={`flex-1 py-2 text-xs font-bold rounded-lg uppercase border ${formData.role === r ? 'bg-primary text-white border-primary' : 'bg-white dark:bg-zinc-800 text-gray-500 border-gray-200 dark:border-gray-700'}`}>{getRoleLabel(r)}</button>))}</div></div>
                         <div className="grid grid-cols-2 gap-4">
                              <div>
-                                <label className="text-xs font-bold text-gray-500 block mb-1">Contraseña *</label>
+                                <label className="text-xs font-bold text-gray-500 block mb-1">PIN (4 Dígitos) *</label>
                                 <div className="relative">
-                                    <input type={showPassword ? "text" : "password"} className="w-full p-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 text-sm outline-none focus:border-primary pr-8" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} />
+                                    <input 
+                                        type={showPassword ? "text" : "password"} 
+                                        className="w-full p-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 text-sm outline-none focus:border-primary pr-8 font-mono tracking-widest" 
+                                        value={formData.password} 
+                                        onChange={(e) => handlePinInput(e, 'password')} 
+                                        placeholder="0000"
+                                    />
                                     <button onClick={() => setShowPassword(!showPassword)} type="button" className="absolute right-0 top-0 h-full px-3 text-gray-400 flex items-center justify-center hover:text-gray-600"><span className="material-symbols-outlined text-sm">{showPassword ? 'visibility_off' : 'visibility'}</span></button>
                                 </div>
                             </div>
-                             <div><label className="text-xs font-bold text-gray-500 block mb-1">Confirmar *</label><input type="password" className="w-full p-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 text-sm outline-none focus:border-primary" value={formData.confirmPassword} onChange={e => setFormData({...formData, confirmPassword: e.target.value})} /></div>
+                             <div>
+                                <label className="text-xs font-bold text-gray-500 block mb-1">Confirmar PIN *</label>
+                                <input 
+                                    type="password" 
+                                    className="w-full p-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-zinc-800 text-sm outline-none focus:border-primary font-mono tracking-widest" 
+                                    value={formData.confirmPassword} 
+                                    onChange={(e) => handlePinInput(e, 'confirmPassword')} 
+                                    placeholder="0000"
+                                />
+                             </div>
                         </div>
                         <div>
                             <label className="text-xs font-bold text-gray-500 block mb-1">ID Firma Digital</label>

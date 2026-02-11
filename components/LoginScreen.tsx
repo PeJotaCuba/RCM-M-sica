@@ -29,7 +29,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, users, onUpda
     if (user) {
         onLoginSuccess(user);
     } else {
-        setError("Usuario o Contraseña incorrectos");
+        setError("Usuario o PIN incorrectos");
         setPassword('');
     }
   };
@@ -38,6 +38,16 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, users, onUpda
       if (e.key === 'Enter') {
           handleLoginSubmit();
       }
+  };
+
+  const handlePinChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      // Only allow numbers and max 4 digits (though admin pw might be different, user pin is 4 digits)
+      // Actually, admin pw is alphanumeric (RC0026), so we must allow text but maybe hint at PIN for users.
+      // The requirement says "Authentication of users via 4 digit pin".
+      // We'll keep it text type to support the admin password, but style it for PINs.
+      setIdentifier(prev => prev); // no-op to fix linter unused variable if logic changes
+      setPassword(e.target.value);
+      setError('');
   };
 
   return (
@@ -85,18 +95,16 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, users, onUpda
                  </div>
 
                  <div>
-                     <label className="block text-xs font-bold text-gray-500 mb-1 ml-1">Contraseña</label>
+                     <label className="block text-xs font-bold text-gray-500 mb-1 ml-1">PIN de Acceso</label>
                      <div className="relative">
                          <span className="material-symbols-outlined absolute left-3 top-2.5 text-gray-400 text-lg">lock</span>
                          <input 
                             type={showPassword ? "text" : "password"}
-                            placeholder="••••••••"
-                            className="w-full pl-9 pr-9 py-3 rounded-xl bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-gray-700 focus:border-azul-header focus:ring-1 focus:ring-azul-header outline-none transition-all text-sm"
+                            placeholder="0000"
+                            maxLength={6} // Allow slightly more for admin password
+                            className="w-full pl-9 pr-9 py-3 rounded-xl bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-gray-700 focus:border-azul-header focus:ring-1 focus:ring-azul-header outline-none transition-all text-sm tracking-widest font-mono"
                             value={password}
-                            onChange={(e) => {
-                                setPassword(e.target.value);
-                                setError('');
-                            }}
+                            onChange={handlePinChange}
                             onKeyDown={handleKeyDown}
                          />
                          <button 
